@@ -19,6 +19,7 @@ import (
 type OAuthService struct {
 	clientRepo ports.ClientRepository
 	authCache  ports.AuthCodeCache
+	rtRepo     ports.RefreshTokenRepository
 	keyService *KeyService
 	userRepo   ports.UserRepository
 	cfg        *config.Config
@@ -27,6 +28,7 @@ type OAuthService struct {
 func NewOAuthService(
 	clientRepo ports.ClientRepository,
 	authCache ports.AuthCodeCache,
+	rtRepo ports.RefreshTokenRepository,
 	keyService *KeyService,
 	userRepo ports.UserRepository,
 	cfg *config.Config,
@@ -34,6 +36,7 @@ func NewOAuthService(
 	return &OAuthService{
 		clientRepo: clientRepo,
 		authCache:  authCache,
+		rtRepo:     rtRepo,
 		keyService: keyService,
 		userRepo:   userRepo,
 		cfg:        cfg,
@@ -180,11 +183,25 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		return nil, err
 	}
 
+	// 5.5 Generate Refresh Token
+	rtBytes := make([]byte, 32)
+	rand.Read(rtBytes)
+	refreshTokenStr := base64.URLEncoding.EncodeToString(rtBytes)
+	rt := &models.RefreshToken{
+		Token:     refreshTokenStr,
+		ClientID:  clientID,
+		UserID:    info.UserID,
+		Scopes:    info.Scopes,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+	}
+	s.rtRepo.Create(ctx, rt)
+
 	// 6. เตรียมส่งกลับ
 	response := map[string]interface{}{
-		"access_token": accessToken,
-		"token_type":   "Bearer",
-		"expires_in":   3600,
+		"access_token":  accessToken,
+		"refresh_token": refreshTokenStr,
+		"token_type":    "Bearer",
+		"expires_in":    3600,
 	}
 
 	// 7. จัดให้มี OIDC (ID Token) ด้วยมั้ย
@@ -236,4 +253,159 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	}
 
 	return response, nil
+}
+// RefreshToken exchanges a valid refresh token for a new set of access/id tokens and optionally a new refresh token.
+func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string, clientID string, clientSecret string) (map[string]interface{}, error) {
+	// 1. Validate Client
+	client, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		return nil, errors.New("invalid_client")
+	}
+
+	if client.ClientType == "confidential" {
+		if clientSecret == "" {
+			return nil, errors.New("invalid_client_secret: confidential clients must provide a secret")
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
+			return nil, errors.New("invalid_client_secret")
+		}
+	}
+
+	// 2. Lookup Refresh Token
+	rt, err := s.rtRepo.FindByToken(ctx, refreshTokenStr)
+	if err != nil || rt == nil {
+		return nil, errors.New("invalid_grant")
+	}
+
+	// 3. Check token validity
+	if rt.Revoked || time.Now().After(rt.ExpiresAt) {
+		s.rtRepo.Delete(ctx, refreshTokenStr) // clear it
+		return nil, errors.New("invalid_grant_expired")
+	}
+	if rt.ClientID != clientID {
+		return nil, errors.New("invalid_grant_client_mismatch")
+	}
+
+	// 4. Issue new tokens (Access + ID + new Refresh Token potentially)
+	// Optionally revoke the old one, but for resilience, some keep it. Let's rotate it:
+	s.rtRepo.Delete(ctx, refreshTokenStr)
+
+	keyMgr, err := s.keyService.GetActiveKeyManager(ctx)
+	if err != nil {
+		return nil, errors.New("internal_server_error_keys")
+	}
+
+	now := time.Now()
+	atClaims := jwt.MapClaims{
+		"iss":    s.cfg.Issuer,
+		"sub":    rt.UserID,
+		"aud":    clientID,
+		"exp":    now.Add(1 * time.Hour).Unix(),
+		"iat":    now.Unix(),
+		"scopes": rt.Scopes,
+	}
+	atToken := jwt.NewWithClaims(jwt.SigningMethodRS256, atClaims)
+	atToken.Header["kid"] = keyMgr.KeyID
+
+	accessToken, err := atToken.SignedString(keyMgr.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Rotate refresh token
+	newRtBytes := make([]byte, 32)
+	rand.Read(newRtBytes)
+	newRefreshTokenStr := base64.URLEncoding.EncodeToString(newRtBytes)
+	newRt := &models.RefreshToken{
+		Token:     newRefreshTokenStr,
+		ClientID:  clientID,
+		UserID:    rt.UserID,
+		Scopes:    rt.Scopes,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // Reset window
+	}
+	s.rtRepo.Create(ctx, newRt)
+
+	response := map[string]interface{}{
+		"access_token":  accessToken,
+		"refresh_token": newRefreshTokenStr,
+		"token_type":    "Bearer",
+		"expires_in":    3600,
+	}
+
+	// ID Token
+	hasOpenID := false
+	for _, scope := range rt.Scopes {
+		if scope == "openid" {
+			hasOpenID = true
+		}
+	}
+	if hasOpenID {
+		idClaims := jwt.MapClaims{
+			"iss": s.cfg.Issuer,
+			"sub": rt.UserID,
+			"aud": clientID,
+			"exp": now.Add(1 * time.Hour).Unix(),
+			"iat": now.Unix(),
+		}
+		user, _ := s.userRepo.FindByID(ctx, rt.UserID)
+		if user != nil {
+			for _, s := range rt.Scopes {
+				if s == "email" {
+					idClaims["email"] = user.Email
+					idClaims["email_verified"] = true
+				}
+				if s == "profile" {
+					idClaims["preferred_username"] = user.Username
+					idClaims["name"] = user.Username
+				}
+			}
+		}
+		idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, idClaims)
+		idToken.Header["kid"] = keyMgr.KeyID
+
+		idTokenStr, err := idToken.SignedString(keyMgr.PrivateKey)
+		if err == nil {
+			response["id_token"] = idTokenStr
+		}
+	}
+
+	return response, nil
+}
+
+// ValidateAccessToken parses and verifies an access token.
+func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString string) (jwt.MapClaims, error) {
+	records, err := s.keyService.keyRepo.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		kidRaw, ok := t.Header["kid"]
+		if !ok {
+			return nil, errors.New("missing kid header")
+		}
+		kid := kidRaw.(string)
+
+		// ค้นหา Public Key ที่ตรงกับ kid ใน JWT Header
+		for _, rec := range records {
+			if rec.Kid == kid {
+				return jwt.ParseRSAPublicKeyFromPEM([]byte(rec.PublicKeyPEM))
+			}
+		}
+		return nil, errors.New("key not found")
+	})
+
+	if err != nil || !token.Valid {
+		return nil, errors.New("invalid_token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("invalid_token_claims")
+	}
+
+	return claims, nil
 }

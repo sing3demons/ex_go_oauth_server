@@ -41,8 +41,9 @@ func main() {
 	transactionCache := redis_store.NewTransactionCache(redisClient)
 
 	// Init Core Key Service
+	rtRepo := mongo_store.NewRefreshTokenRepository(db)
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount)
-	oauthService := services.NewOAuthService(clientRepo, authCodeCache, keyService, userRepo, cfg)
+	oauthService := services.NewOAuthService(clientRepo, authCodeCache, rtRepo, keyService, userRepo, cfg)
 
 	// Start Key generation or fetching
 	ctx := context.Background()
@@ -63,6 +64,8 @@ func main() {
 	mux.HandleFunc("POST /login", oauthHandler.LoginSubmit)
 	mux.HandleFunc("POST /register", oauthHandler.RegisterSubmit)
 	mux.HandleFunc("POST /token", oauthHandler.Token)
+	mux.HandleFunc("GET /userinfo", oauthHandler.UserInfo)
+	mux.HandleFunc("POST /userinfo", oauthHandler.UserInfo)
 
 	adminHandler := handlers.NewAdminHandler(userRepo, clientRepo)
 	

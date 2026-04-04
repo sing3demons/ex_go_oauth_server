@@ -31,6 +31,13 @@ type KeyCache interface {
 	SetRaw(ctx context.Context, key *models.KeyRecord) error
 }
 
+type RefreshTokenRepository interface {
+	Create(ctx context.Context, rt *models.RefreshToken) error
+	FindByToken(ctx context.Context, token string) (*models.RefreshToken, error)
+	Delete(ctx context.Context, token string) error
+	DeleteExpired(ctx context.Context) error
+}
+
 type AuthCodeCache interface {
 	SetCode(ctx context.Context, code string, info *models.AuthCodeInfo, ttl time.Duration) error
 	GetCode(ctx context.Context, code string) (*models.AuthCodeInfo, error)

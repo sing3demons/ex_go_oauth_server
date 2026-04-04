@@ -219,7 +219,7 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	}
 
 	grantType := r.FormValue("grant_type")
-	if grantType != "authorization_code" {
+	if grantType != "authorization_code" && grantType != "refresh_token" {
 		http.Error(w, "unsupported_grant_type", http.StatusBadRequest)
 		return
 	}
@@ -231,18 +231,81 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		clientID, clientSecret, _ = r.BasicAuth()
 	}
 
-	redirectURI := r.FormValue("redirect_uri")
-	codeVerifier := r.FormValue("code_verifier")
+	var response map[string]interface{}
+	var err error
 
-	// สั่ง Oauth เดินเรื่องแจกแหวน 
-	response, err := h.oauthService.ExchangeToken(r.Context(), code, clientID, clientSecret, redirectURI, codeVerifier)
+	if grantType == "authorization_code" {
+		redirectURI := r.FormValue("redirect_uri")
+		codeVerifier := r.FormValue("code_verifier")
+		response, err = h.oauthService.ExchangeToken(r.Context(), code, clientID, clientSecret, redirectURI, codeVerifier)
+	} else if grantType == "refresh_token" {
+		refreshToken := r.FormValue("refresh_token")
+		response, err = h.oauthService.RefreshToken(r.Context(), refreshToken, clientID, clientSecret)
+	}
+
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest) // ตามหลักต้องเป็น 400 เสมอ
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// UserInfo (GET /userinfo) เปิดรับให้ Web/Mobile ตรวจข้อมูลส่วนตัว
+func (h *OAuthHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, "Missing or invalid Bearer token", http.StatusUnauthorized)
+		return
+	}
+
+	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+
+	// 1. ตรวจสอบความถูกต้องของ JWT
+	claims, err := h.oauthService.ValidateAccessToken(r.Context(), tokenStr)
+	if err != nil {
+		http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	// 2. ควัก ID ผู้ใช้จาก 'sub'
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
+
+	// 3. ดึงข้อมูล User จาก DB
+	user, err := h.userRepo.FindByID(r.Context(), sub)
+	if err != nil || user == nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// 4. ประกอบร่าง JSON ตามมาตรฐาน OIDC
+	userInfo := map[string]interface{}{
+		"sub": user.ID,
+	}
+
+	// ตรวจสอบ Scopes ที่พ่วงมากว่าได้รับอนุญาตให้ดูอะไรบ้าง
+	if scopesRaw, ok := claims["scopes"].([]interface{}); ok {
+		for _, sRaw := range scopesRaw {
+			if s, ok := sRaw.(string); ok {
+				if s == "profile" {
+					userInfo["name"] = user.Username
+					userInfo["preferred_username"] = user.Username
+				}
+				if s == "email" {
+					userInfo["email"] = user.Email
+					userInfo["email_verified"] = true
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userInfo)
 }
