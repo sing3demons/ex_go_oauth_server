@@ -1,0 +1,10 @@
+@uri=http://localhost:8080
+
+### health
+GET {{uri}}/health
+
+### Test GET request
+GET {{uri}}/.well-known/openid-configuration
+
+###
+GET {{uri}}/jwks.json

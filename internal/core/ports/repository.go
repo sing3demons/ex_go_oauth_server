@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/sing3demons/tr_02_oauth/internal/core/models"
 )
@@ -27,4 +28,16 @@ type KeyRepository interface {
 type KeyCache interface {
 	GetRaw(ctx context.Context) (*models.KeyRecord, error)
 	SetRaw(ctx context.Context, key *models.KeyRecord) error
+}
+
+type AuthCodeCache interface {
+	SetCode(ctx context.Context, code string, info *models.AuthCodeInfo, ttl time.Duration) error
+	GetCode(ctx context.Context, code string) (*models.AuthCodeInfo, error)
+	DeleteCode(ctx context.Context, code string) error
+}
+
+type SessionCache interface {
+	SetSession(ctx context.Context, sessionID string, info *models.SessionInfo, ttl time.Duration) error
+	GetSession(ctx context.Context, sessionID string) (*models.SessionInfo, error)
+	DeleteSession(ctx context.Context, sessionID string) error
 }

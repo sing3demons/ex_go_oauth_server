@@ -59,6 +59,46 @@
 
 ---
 
+## 🗝️ สถาปัตยกรรม Key Management (JWKS)
+
+ระบบการจัดการกุญแจเข้ารหัส (RSA Key Pair) สำหรับโปรเจกต์นี้ถูกออกแบบเป็น **Graceful Key Rotation แบบ Hybrid (MongoDB + Redis)** ทรงประสิทธิภาพระดับ Enterprise โดยทำงานผ่าน Cache เพื่อรองรับการสเกลแบบ Multiple Instances (Stateless):
+
+1. **Redis Caching (`jwks:current`)**: ทำหน้าที่เป็นหน้าด่านคอยแคชกุญแจตัวปัจจุบัน (Active Key) ทำให้เซิร์ฟเวอร์ดึงไปแจก Access Token (JWT) ได้รวดเร็ว โดยผูก TTL หมดอายุตามค่าตัวแปร `KEY_ROTATION_DURATION` (ค่าตั้งต้น 30 วัน)
+2. **MongoDB Fallback & Persistence**: ต้นแบบกุญแจจะถูกฝังประวัติไว้ใน Collection `keys` ถ้าระบบพบว่ากุญแจใน Redis หมดอายุการใช้งานแล้ว เซิร์ฟเวอร์จะสั่งปั่นกุญแจตัวใหม่ (Generate New Key) ส่งเข้าไปเรียงตัวใน MongoDB และดึงกลับไปพักใน Redis คืน ทำให้การผลัดเปลี่ยนกุญแจ (Key Rotation) เกิดขึ้นได้อย่างรวดเร็วและเป็นอัตโนมัติ
+3. **Grace Period & Auto-Prune**: 
+   - ระบบดูแล Token เก่าๆ อย่างนุ่มนวล โดยเมื่อมีคำขอมาที่ Endpoint `/jwks.json` แทนที่จะตอบแค่กุญแจตัวล่าสุดเพียงตัวเดียว ระบบจะเอาประวัติกุญแจเก่าที่เพิ่งหมดอายุไปไม่เกิน 14 วัน (`KEY_GRACE_PERIOD`) ส่งไปโชว์คู่กันด้วย ช่วยให้ระบบฝั่ง Client ยังคง Verify ค่าเก่าได้ไม่มีกระตุก (Downtime 0%)
+   - **Auto-Prune**: ระบบจะควบคุมขยะและข้อมูลบวมใน Database ให้มีประวัติกองอยู่ไม่เกินเพดานสูงสุดตลอดกาล (`KEY_MAX_RETENTION_COUNT` = 5 อัน) กุญแจที่เกินจากโควต้าจะถูกลบกวาดทิ้งให้เองทันทีแบบเนียนๆ
+
+### 📊 แผนภาพจำลองการทำงาน (Flow Diagram)
+
+```mermaid
+sequenceDiagram
+    participant API as OIDC Service
+    participant Redis as Redis (Cache)
+    participant Mongo as MongoDB (Storage)
+
+    Note over API: จังหวะต้องการ Sign JWT หรืออ่าน JWKS
+    API->>Redis: 1. ควานหากุญแจปัจุบัน (jwks:current)
+    alt มีแคช (Cache Hit)
+        Redis-->>API: 2. ได้หน้ากุญแจ เอาไปใช้ต่อทันที
+    else หมดอายุ (Cache Miss / TTL Expired)
+        Redis-->>API: ไม่เจอ (Not Found)
+        API->>Mongo: 3. ค้นหาคีย์จากประวัติล่าสุด
+        alt ประวัติหมดอายุ หรือ ไม่มีขัอมูล (Expired/Empty)
+            API->>API: 4. สร้าง RSA Key คู่ใหม่ (Generate)
+            API->>Mongo: 5. Insert ลงบันทึกประวัติ
+            API->>Mongo: 6. กวาดลบกุญแจเก่าที่เกินโควต้า 5 ตัวทิ้ง (Auto-Prune)
+            API->>Redis: 7. เซฟลงแคชตั้งเวลาพัก (TTL)
+        else ยังใช้งานได้แต่แคสหด
+            Mongo-->>API: ได้หน้ากุญแจ
+            API->>Redis: เซฟลงแคชไว้แบบเดิม
+        end
+    end
+    Note over API: กระบวนการคัดกรองเสร็จสิ้นพร้อมใช้งาน
+```
+
+---
+
 ## 🌐 Endpoints ปัจจุบัน (API อ้างอิง)
 
 | Method | Endpoint | รายละเอียด / หน้าที่ |

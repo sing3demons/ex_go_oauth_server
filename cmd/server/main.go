@@ -33,6 +33,12 @@ func main() {
 	keyRepo := mongo_store.NewKeyRepository(db, cfg.KeyGracePeriod)
 	keyCache := redis_store.NewKeyCache(redisClient)
 
+	// Init Adapters for OAuth entities
+	_ = mongo_store.NewUserRepository(db)
+	_ = mongo_store.NewClientRepository(db)
+	_ = redis_store.NewAuthCodeCache(redisClient)
+	_ = redis_store.NewSessionCache(redisClient)
+
 	// Init Core Key Service
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount)
 

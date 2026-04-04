@@ -20,7 +20,7 @@ type Config struct {
 func LoadConfig() *Config {
 	return &Config{
 		Port:                 getEnv("PORT", "8080"),
-		MongoURI:             getEnv("MONGO_URI", "mongodb://root:password@localhost:27017"),
+		MongoURI:             getEnv("MONGO_URI", "mongodb://localhost:27017"),
 		MongoDBName:          getEnv("MONGO_DB_NAME", "oidc_db"),
 		RedisURI:             getEnv("REDIS_URI", "redis://localhost:6379/0"),
 		Issuer:               getEnv("ISSUER", "http://localhost:8080"),
