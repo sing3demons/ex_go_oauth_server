@@ -15,6 +15,8 @@ type Config struct {
 	KeyRotationDuration  time.Duration
 	KeyGracePeriod       time.Duration
 	KeyMaxRetentionCount int
+	AdminUsername        string
+	AdminPassword        string
 }
 
 func LoadConfig() *Config {
@@ -27,6 +29,8 @@ func LoadConfig() *Config {
 		KeyRotationDuration:  getDurationEnv("KEY_ROTATION_DURATION", 30*24*time.Hour),
 		KeyGracePeriod:       getDurationEnv("KEY_GRACE_PERIOD", 14*24*time.Hour),
 		KeyMaxRetentionCount: getIntEnv("KEY_MAX_RETENTION_COUNT", 5),
+		AdminUsername:        getEnv("ADMIN_USERNAME", "admin"),
+		AdminPassword:        getEnv("ADMIN_PASSWORD", "adminsecret"),
 	}
 }
 

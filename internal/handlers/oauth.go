@@ -11,6 +11,7 @@ import (
 	"github.com/sing3demons/tr_02_oauth/internal/core/models"
 	"github.com/sing3demons/tr_02_oauth/internal/core/ports"
 	"github.com/sing3demons/tr_02_oauth/internal/core/services"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type OAuthHandler struct {
@@ -126,8 +127,9 @@ func (h *OAuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// NOTE: ระบบ Production ต้องเข้ารหัสแบบ Bcrypt ตลอดเสมอ (เอาออกเพื่อเดโม่ง่ายๆ ก่อน)
-	if user.PasswordHash != password {
+	// ตรวจสอบข้อมูลจาก Bcrypt
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	if err != nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}

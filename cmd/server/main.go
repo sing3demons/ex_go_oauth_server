@@ -41,7 +41,7 @@ func main() {
 
 	// Init Core Key Service
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount)
-	oauthService := services.NewOAuthService(clientRepo, authCodeCache, keyService, cfg)
+	oauthService := services.NewOAuthService(clientRepo, authCodeCache, keyService, userRepo, cfg)
 
 	// Start Key generation or fetching
 	ctx := context.Background()
@@ -62,6 +62,14 @@ func main() {
 	mux.HandleFunc("GET /login", oauthHandler.LoginPage)
 	mux.HandleFunc("POST /login", oauthHandler.LoginSubmit)
 	mux.HandleFunc("POST /token", oauthHandler.Token)
+
+	registerHandler := handlers.NewRegisterHandler(userRepo)
+	mux.HandleFunc("GET /register", registerHandler.RegisterPage)
+	mux.HandleFunc("POST /register", registerHandler.RegisterSubmit)
+
+	adminHandler := handlers.NewAdminHandler(userRepo, clientRepo)
+	mux.HandleFunc("POST /admin/users", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateUser))
+	mux.HandleFunc("POST /admin/clients", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateClient))
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

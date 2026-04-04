@@ -17,6 +17,7 @@ type OAuthService struct {
 	clientRepo ports.ClientRepository
 	authCache  ports.AuthCodeCache
 	keyService *KeyService
+	userRepo   ports.UserRepository
 	cfg        *config.Config
 }
 
@@ -24,12 +25,14 @@ func NewOAuthService(
 	clientRepo ports.ClientRepository,
 	authCache ports.AuthCodeCache,
 	keyService *KeyService,
+	userRepo ports.UserRepository,
 	cfg *config.Config,
 ) *OAuthService {
 	return &OAuthService{
 		clientRepo: clientRepo,
 		authCache:  authCache,
 		keyService: keyService,
+		userRepo:   userRepo,
 		cfg:        cfg,
 	}
 }
@@ -52,6 +55,19 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 	if !validURI {
 		return "", errors.New("invalid_redirect_uri")
 	}
+
+	// 2.5 Scope Validation (Filtering)
+	allowedMap := make(map[string]bool)
+	for _, s := range client.AllowedScopes {
+		allowedMap[s] = true
+	}
+	var finalScopes []string
+	for _, s := range scopes {
+		if allowedMap[s] {
+			finalScopes = append(finalScopes, s)
+		}
+	}
+	scopes = finalScopes
 
 	// 3. ปั๊มรหัส Authorization Code สุ่มขึ้นมา
 	b := make([]byte, 16)
@@ -131,11 +147,13 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, redire
 
 	// 7. จัดให้มี OIDC (ID Token) ด้วยมั้ย
 	hasOpenID := false
+	hasEmail := false
+	hasProfile := false
+
 	for _, scope := range info.Scopes {
-		if scope == "openid" {
-			hasOpenID = true
-			break
-		}
+		if scope == "openid" { hasOpenID = true }
+		if scope == "email" { hasEmail = true }
+		if scope == "profile" { hasProfile = true }
 	}
 
 	if hasOpenID {
@@ -149,6 +167,21 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, redire
 		// ป้อน Nonce คืนเข้าไปเพื่อปิดกั้น CSRF Attack
 		if info.Nonce != "" {
 			idClaims["nonce"] = info.Nonce
+		}
+
+		// เติมข้อมูลตาม OIDC Standard Scopes
+		if hasEmail || hasProfile {
+			user, _ := s.userRepo.FindByID(ctx, info.UserID)
+			if user != nil {
+				if hasEmail {
+					idClaims["email"] = user.Email
+					idClaims["email_verified"] = true
+				}
+				if hasProfile {
+					idClaims["preferred_username"] = user.Username
+					idClaims["name"] = user.Username // mock using username as default name
+				}
+			}
 		}
 
 		idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, idClaims)
