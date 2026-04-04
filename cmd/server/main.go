@@ -1,0 +1,62 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+
+	"github.com/sing3demons/tr_02_oauth/internal/adapters/mongo_store"
+	"github.com/sing3demons/tr_02_oauth/internal/adapters/redis_store"
+	"github.com/sing3demons/tr_02_oauth/internal/config"
+	"github.com/sing3demons/tr_02_oauth/internal/core/services"
+	"github.com/sing3demons/tr_02_oauth/internal/handlers"
+)
+
+func main() {
+	cfg := config.LoadConfig()
+
+	// Init MongoDB
+	mongoClient, err := mongo_store.NewMongoClient(cfg.MongoURI)
+	if err != nil {
+		log.Fatalf("MongoDB connection failed: %v", err)
+	}
+	db := mongoClient.Database(cfg.MongoDBName)
+
+	// Init Redis
+	redisClient, err := redis_store.NewRedisClient(cfg.RedisURI)
+	if err != nil {
+		log.Fatalf("Redis connection failed: %v", err)
+	}
+
+	// Init Adapters for JWKS
+	keyRepo := mongo_store.NewKeyRepository(db, cfg.KeyGracePeriod)
+	keyCache := redis_store.NewKeyCache(redisClient)
+
+	// Init Core Key Service
+	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount)
+
+	// Start Key generation or fetching
+	ctx := context.Background()
+	if _, err := keyService.GetActiveKeyManager(ctx); err != nil {
+		log.Fatalf("Failed to initialize RSA keys from Mongo/Redis: %v", err)
+	}
+	log.Println("JWKS Key Management Service Initialized Successfully")
+
+	// HTTP Routing Setup
+	mux := http.NewServeMux()
+
+	discoveryHandler := handlers.NewDiscoveryHandler(cfg, keyService)
+	mux.HandleFunc("GET /.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
+	mux.HandleFunc("GET /jwks.json", discoveryHandler.JWKS)
+
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	log.Printf("Starting OIDC Server on port %s", cfg.Port)
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), mux); err != nil {
+		log.Fatalf("Server failed: %v", err)
+	}
+}
