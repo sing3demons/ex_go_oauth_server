@@ -35,3 +35,17 @@ func (r *ClientRepository) FindByID(ctx context.Context, clientID string) (*mode
 	}
 	return &client, nil
 }
+
+func (r *ClientRepository) FindAll(ctx context.Context) ([]*models.Client, error) {
+	cursor, err := r.col.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var clients []*models.Client
+	if err := cursor.All(ctx, &clients); err != nil {
+		return nil, err
+	}
+	return clients, nil
+}

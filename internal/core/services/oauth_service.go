@@ -13,6 +13,7 @@ import (
 	"github.com/sing3demons/tr_02_oauth/internal/config"
 	"github.com/sing3demons/tr_02_oauth/internal/core/models"
 	"github.com/sing3demons/tr_02_oauth/internal/core/ports"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type OAuthService struct {
@@ -44,6 +45,10 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 	client, err := s.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
 		return "", errors.New("invalid_client")
+	}
+
+	if client.RequirePKCE && codeChallenge == "" {
+		return "", errors.New("invalid_request_pkce_required_for_this_client")
 	}
 
 	// 2. Validate Redirect URI
@@ -97,7 +102,7 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 	return code, nil
 }
 
-func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, redirectURI, codeVerifier string) (map[string]interface{}, error) {
+func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, clientSecret, redirectURI, codeVerifier string) (map[string]interface{}, error) {
 	// 1. ค้นหา Auth Code จาก Redis
 	info, err := s.authCache.GetCode(ctx, code)
 	if err != nil || info == nil {
@@ -116,6 +121,20 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, redire
 	}
 	if time.Now().After(info.ExpiresAt) {
 		return nil, errors.New("invalid_grant_expired")
+	}
+
+	// 3.1 ตรวจสอบ Confidential Client
+	client, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		return nil, errors.New("invalid_client")
+	}
+	if client.ClientType == "confidential" {
+		if clientSecret == "" {
+			return nil, errors.New("invalid_client_secret: confidential clients must provide a secret")
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
+			return nil, errors.New("invalid_client_secret: secret mismatch")
+		}
 	}
 
 	// 3.5 PKCE Verification

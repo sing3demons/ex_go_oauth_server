@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -94,4 +98,119 @@ func (h *AdminHandler) CreateClient(w http.ResponseWriter, r *http.Request) {
 		"message":   "Client created successfully",
 		"client_id": client.ClientID,
 	})
+}
+
+// -----------------------------------------------------
+// Admin UI Handlers
+// -----------------------------------------------------
+
+func (h *AdminHandler) DashboardUI(w http.ResponseWriter, r *http.Request) {
+	clients, err := h.clientRepo.FindAll(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to fetch clients", http.StatusInternalServerError)
+		return
+	}
+
+	tmpl, err := template.ParseFiles("templates/admin_dashboard.html")
+	if err != nil {
+		http.Error(w, "Failed to load template", http.StatusInternalServerError)
+		return
+	}
+
+	data := struct {
+		Clients []*models.Client
+	}{
+		Clients: clients,
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	tmpl.Execute(w, data)
+}
+
+func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	clientName := r.FormValue("client_name")
+	redirectURIsRaw := r.FormValue("redirect_uris")
+	requirePKCE := r.FormValue("require_pkce") == "true"
+	
+	// รับ Checkbox ที่ชื่อเดียวกันมาเป็น slice ของ string
+	r.ParseForm() // already parsed actually, but let's be safe
+	scopes := r.Form["scopes"]
+	if len(scopes) == 0 {
+		scopes = []string{}
+	}
+
+	// Clean up Redirect URIs (comma separated)
+	var redirectURIs []string
+	for _, uri := range strings.Split(redirectURIsRaw, ",") {
+		cleanURI := strings.TrimSpace(uri)
+		if cleanURI != "" {
+			redirectURIs = append(redirectURIs, cleanURI)
+		}
+	}
+
+	clientType := r.FormValue("client_type")
+	if clientType == "" {
+		clientType = "public"
+	}
+
+	clientID := uuid.New().String()
+	var plainSecret string
+	var secretHash string
+
+	if clientType == "confidential" {
+		// Generate 32 bytes of random data for the secret
+		secretBytes := make([]byte, 32)
+		rand.Read(secretBytes)
+		plainSecret = base64.URLEncoding.EncodeToString(secretBytes)
+		
+		hash, err := bcrypt.GenerateFromPassword([]byte(plainSecret), bcrypt.DefaultCost)
+		if err == nil {
+			secretHash = string(hash)
+		}
+	}
+
+	client := &models.Client{
+		ClientID:         clientID,
+		ClientSecretHash: secretHash,
+		ClientType:       clientType,
+		ClientName:       clientName,
+		RedirectURIs:     redirectURIs,
+		GrantTypes:       []string{"authorization_code"},
+		AllowedScopes:    scopes,
+		RequirePKCE:      requirePKCE,
+	}
+
+	if err := h.clientRepo.Create(r.Context(), client); err != nil {
+		http.Error(w, "Failed to create client", http.StatusInternalServerError)
+		return
+	}
+
+	if clientType == "confidential" {
+		tmpl, err := template.ParseFiles("templates/client_success.html")
+		if err != nil {
+			http.Error(w, "Failed to load success template", http.StatusInternalServerError)
+			return
+		}
+		data := struct {
+			ClientID     string
+			ClientName   string
+			ClientType   string
+			ClientSecret string
+		}{
+			ClientID:     clientID,
+			ClientName:   clientName,
+			ClientType:   clientType,
+			ClientSecret: plainSecret,
+		}
+		w.Header().Set("Content-Type", "text/html")
+		tmpl.Execute(w, data)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/dashboard", http.StatusFound)
 }

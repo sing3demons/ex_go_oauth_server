@@ -38,6 +38,7 @@ func main() {
 	clientRepo := mongo_store.NewClientRepository(db)
 	authCodeCache := redis_store.NewAuthCodeCache(redisClient)
 	sessionCache := redis_store.NewSessionCache(redisClient)
+	transactionCache := redis_store.NewTransactionCache(redisClient)
 
 	// Init Core Key Service
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount)
@@ -57,19 +58,21 @@ func main() {
 	mux.HandleFunc("GET /.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	mux.HandleFunc("GET /jwks.json", discoveryHandler.JWKS)
 
-	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, sessionCache)
+	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, sessionCache, transactionCache)
 	mux.HandleFunc("GET /authorize", oauthHandler.Authorize)
-	mux.HandleFunc("GET /login", oauthHandler.LoginPage)
 	mux.HandleFunc("POST /login", oauthHandler.LoginSubmit)
+	mux.HandleFunc("POST /register", oauthHandler.RegisterSubmit)
 	mux.HandleFunc("POST /token", oauthHandler.Token)
 
-	registerHandler := handlers.NewRegisterHandler(userRepo)
-	mux.HandleFunc("GET /register", registerHandler.RegisterPage)
-	mux.HandleFunc("POST /register", registerHandler.RegisterSubmit)
-
 	adminHandler := handlers.NewAdminHandler(userRepo, clientRepo)
+	
+	// API Endpoints
 	mux.HandleFunc("POST /admin/users", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateUser))
 	mux.HandleFunc("POST /admin/clients", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateClient))
+
+	// UI Endpoints
+	mux.HandleFunc("GET /admin/dashboard", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.DashboardUI))
+	mux.HandleFunc("POST /admin/clients/ui", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateClientUI))
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

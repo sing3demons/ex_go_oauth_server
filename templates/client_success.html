@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Client Created Successfully</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background-color: #f0f2f5; margin: 0; padding: 40px; color: #333; display: flex; justify-content: center; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); max-width: 600px; width: 100%; }
+        h1 { margin-top: 0; color: #28a745; display: flex; align-items: center; gap: 10px; }
+        .warning-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+        .warning-box p { margin: 0 0 10px 0; font-weight: bold; color: #856404; }
+        .secret-box { background: #f8dbd8; border: 1px solid #f5c6cb; padding: 15px; border-radius: 6px; font-family: monospace; font-size: 18px; color: #721c24; text-align: center; word-break: break-all; margin-bottom: 20px; }
+        .btn { display: inline-block; padding: 12px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
+        .btn:hover { background: #0056b3; }
+        .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .detail-row strong { color: #555; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>✅ Client Created Successfully</h1>
+        
+        <div class="detail-row">
+            <strong>Client Name</strong>
+            <span>{{.ClientName}}</span>
+        </div>
+        <div class="detail-row">
+            <strong>Client ID</strong>
+            <span style="font-family: monospace;">{{.ClientID}}</span>
+        </div>
+
+        {{if eq .ClientType "confidential"}}
+        <div style="margin-top: 30px;">
+            <div class="warning-box">
+                <p>⚠️ STOP AND COPY YOUR CLIENT SECRET NOW</p>
+                This is the ONLY time we will ever display this secret. If you lose it, you will need to create a new Client. Store it securely in your Backend (BFF). DO NOT expose it to the public frontend.
+            </div>
+            <div class="secret-box">
+                {{.ClientSecret}}
+            </div>
+        </div>
+        {{end}}
+
+        <div style="margin-top: 30px; text-align: center;">
+            <a href="/admin/dashboard" class="btn">Return to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>

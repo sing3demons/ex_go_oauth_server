@@ -15,6 +15,7 @@ type UserRepository interface {
 
 type ClientRepository interface {
 	FindByID(ctx context.Context, clientID string) (*models.Client, error)
+	FindAll(ctx context.Context) ([]*models.Client, error)
 	Create(ctx context.Context, client *models.Client) error
 }
 
@@ -40,4 +41,10 @@ type SessionCache interface {
 	SetSession(ctx context.Context, sessionID string, info *models.SessionInfo, ttl time.Duration) error
 	GetSession(ctx context.Context, sessionID string) (*models.SessionInfo, error)
 	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+type TransactionCache interface {
+	SetTransaction(ctx context.Context, txID string, info *models.AuthTransaction, ttl time.Duration) error
+	GetTransaction(ctx context.Context, txID string) (*models.AuthTransaction, error)
+	DeleteTransaction(ctx context.Context, txID string) error
 }

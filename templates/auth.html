@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDC Secure Gateway</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f7f9fc; margin: 0; }
+        .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 320px; }
+        input { width: 100%; padding: 12px; margin: 10px 0 20px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
+        
+        .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0056b3; }
+        
+        .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #218838; }
+
+        .logo { text-align: center; font-size: 24px; font-weight: bold; margin-bottom: 20px; color: #333; }
+        
+        .tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #eee; }
+        .tab { flex: 1; text-align: center; padding: 10px; cursor: pointer; color: #777; font-weight: 600; transition: 0.3s; }
+        .tab.active { color: #007bff; border-bottom: 2px solid #007bff; }
+        
+        .form-section { display: none; }
+        .form-section.active { display: block; }
+
+        .error { color: #dc3545; font-size: 14px; margin-bottom: 15px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">OIDC Gateway</div>
+        
+        {{if .Error}}
+        <div class="error">{{.Error}}</div>
+        {{end}}
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('login')">Log In</div>
+            <div class="tab" onclick="switchTab('register')">Sign Up</div>
+        </div>
+
+        <!-- Login Form -->
+        <div id="login-form" class="form-section active">
+            <form method="POST" action="/login?sid={{.SID}}&tid={{.TID}}">
+                <label>Username</label>
+                <input type="text" name="username" placeholder="your username" required />
+                <label>Password</label>
+                <input type="password" name="password" placeholder="••••••••" required />
+                <button type="submit" class="btn-primary">Sign In</button>
+            </form>
+        </div>
+
+        <!-- Register Form -->
+        <div id="register-form" class="form-section">
+            <form method="POST" action="/register?sid={{.SID}}&tid={{.TID}}">
+                <label>Username</label>
+                <input type="text" name="username" placeholder="new username" required />
+                <label>Email</label>
+                <input type="email" name="email" placeholder="email@address.com" required />
+                <label>Password</label>
+                <input type="password" name="password" placeholder="••••••••" required />
+                <button type="submit" class="btn-success">Create Account</button>
+            </form>
+        </div>
+
+    </div>
+
+    <script>
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.form-section').forEach(f => f.classList.remove('active'));
+            
+            if (tab === 'login') {
+                document.querySelectorAll('.tab')[0].classList.add('active');
+                document.getElementById('login-form').classList.add('active');
+            } else {
+                document.querySelectorAll('.tab')[1].classList.add('active');
+                document.getElementById('register-form').classList.add('active');
+            }
+        }
+
+        // Auto-switch back to register tab if coming back with errors during registration
+        if (window.location.hash === '#register') {
+            switchTab('register');
+        }
+    </script>
+</body>
+</html>

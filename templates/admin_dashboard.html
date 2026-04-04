@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDC Admin Dashboard</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 350px 1fr; gap: 20px; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h1, h2 { margin-top: 0; color: #1a1a1a; }
+        
+        /* Form Styles */
+        label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 14px; }
+        input[type="text"], textarea { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: monospace; }
+        textarea { resize: vertical; min-height: 80px; }
+        
+        /* Checkbox & Switch */
+        .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
+        .checkbox-item { display: flex; align-items: center; gap: 5px; font-size: 14px; }
+        
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin-bottom: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #007bff; }
+        input:checked + .slider:before { transform: translateX(20px); }
+        .switch-wrapper { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+
+        button { width: 100%; padding: 12px; background: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 15px; }
+        button:hover { background: #218838; }
+        
+        /* Table Styles */
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 12px; background: #e9ecef; margin: 2px; }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+        
+        .code-snippet { font-family: monospace; background: #f4f4f4; padding: 4px 6px; border-radius: 4px; font-size: 12px; word-break: break-all; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header-bar container" style="display: flex; grid-template-columns: 1fr;">
+        <h1>🛡️ OIDC Admin Dashboard</h1>
+    </div>
+
+    <div class="container">
+        <!-- Create Client Form -->
+        <div class="card">
+            <h2>Add New Client</h2>
+            <form method="POST" action="/admin/clients/ui">
+                <label>Client Name</label>
+                <input type="text" name="client_name" placeholder="e.g. Mobile App v1" required />
+
+                <label>Client Type</label>
+                <div class="checkbox-group" style="margin-bottom: 20px;">
+                    <label class="checkbox-item"><input type="radio" name="client_type" value="public" checked> Public (Mobile / SPA)</label>
+                    <label class="checkbox-item"><input type="radio" name="client_type" value="confidential"> Confidential (BFF / Web Server)</label>
+                </div>
+
+                <label>Redirect URIs (comma separated)</label>
+                <textarea name="redirect_uris" placeholder="https://app.com/callback, https://test.app.com/callback" required></textarea>
+
+                <label>Allowed Scopes</label>
+                <div class="checkbox-group">
+                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="openid" checked> openid</label>
+                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="profile" checked> profile</label>
+                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="email" checked> email</label>
+                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="read:posts"> read:posts</label>
+                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="write:data"> write:data</label>
+                </div>
+
+                <div class="switch-wrapper">
+                    <label class="switch">
+                        <input type="checkbox" name="require_pkce" value="true" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span><strong>Require PKCE</strong> (Recommended)</span>
+                </div>
+
+                <button type="submit">Create Client</button>
+            </form>
+        </div>
+
+        <!-- Clients Table -->
+        <div class="card">
+            <h2>Registered Clients</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Client ID</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>PKCE</th>
+                        <th>Redirect URIs</th>
+                        <th>Scopes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Clients}}
+                    <tr>
+                        <td class="code-snippet">{{.ClientID}}</td>
+                        <td><strong>{{.ClientName}}</strong></td>
+                        <td>
+                            {{if eq .ClientType "confidential"}}
+                                <span class="badge" style="background:#6f42c1;color:white;">Confidential</span>
+                            {{else}}
+                                <span class="badge" style="background:#17a2b8;color:white;">Public</span>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{if .RequirePKCE}}
+                                <span class="badge badge-success">Required</span>
+                            {{else}}
+                                <span class="badge badge-danger">Disabled</span>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{range .RedirectURIs}}
+                                <div class="code-snippet" style="margin-bottom: 4px;">{{.}}</div>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{range .AllowedScopes}}
+                                <span class="badge">{{.}}</span>
+                            {{end}}
+                        </td>
+                    </tr>
+                    {{else}}
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 20px; color: #777;">No clients registered yet.</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
