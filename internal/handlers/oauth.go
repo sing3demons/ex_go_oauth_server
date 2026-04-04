@@ -456,3 +456,66 @@ func (h *OAuthHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userInfo)
 }
+
+// Logout (GET /logout) เปิดรับให้ยุติ Session และลบ Cookie
+func (h *OAuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	redirectURI := r.URL.Query().Get("post_logout_redirect_uri")
+	if redirectURI == "" {
+		redirectURI = "/authorize?error=Logged+out+successfully"
+	}
+
+	if cookie, err := r.Cookie("oidc_session"); err == nil {
+		sid := cookie.Value
+		if sid != "" {
+			h.sessionCache.DeleteSession(r.Context(), sid)
+		}
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oidc_session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+
+	http.Redirect(w, r, redirectURI, http.StatusFound)
+}
+
+// Revoke (POST /revoke) เคลียร์ Token ตาม RFC 7009
+func (h *OAuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	token := r.FormValue("token")
+	clientID := r.FormValue("client_id")
+	clientSecret := r.FormValue("client_secret")
+
+	// รองรับ Basic Auth
+	basicID, basicSecret, ok := r.BasicAuth()
+	if ok {
+		if clientID == "" {
+			clientID = basicID
+		}
+		if clientSecret == "" {
+			clientSecret = basicSecret
+		}
+	}
+
+	if token == "" || clientID == "" {
+		http.Error(w, "missing_token_or_client", http.StatusBadRequest)
+		return
+	}
+
+	err := h.oauthService.RevokeToken(r.Context(), token, clientID, clientSecret)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}

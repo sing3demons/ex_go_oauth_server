@@ -424,3 +424,24 @@ func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString stri
 
 	return claims, nil
 }
+
+// RevokeToken invalidates a refresh token
+func (s *OAuthService) RevokeToken(ctx context.Context, tokenStr string, clientID string, clientSecret string) error {
+	client, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		return errors.New("invalid_client")
+	}
+
+	if client.ClientType == "confidential" {
+		if clientSecret == "" {
+			return errors.New("invalid_client_secret")
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
+			return errors.New("invalid_client") 
+		}
+	}
+
+	// ลบออกไป (ถ้าไม่มีในระบบ ก็ให้ถือว่าสำเร็จ 200 OK ตาม RFC)
+	s.rtRepo.Delete(ctx, tokenStr)
+	return nil
+}

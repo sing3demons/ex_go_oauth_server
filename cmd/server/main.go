@@ -69,6 +69,10 @@ func main() {
 	mux.HandleFunc("GET /userinfo", oauthHandler.UserInfo)
 	mux.HandleFunc("POST /userinfo", oauthHandler.UserInfo)
 
+	// Session Management & Token Management
+	mux.HandleFunc("GET /logout", oauthHandler.Logout)
+	mux.HandleFunc("POST /revoke", oauthHandler.Revoke)
+
 	adminHandler := handlers.NewAdminHandler(userRepo, clientRepo)
 	
 	// API Endpoints
