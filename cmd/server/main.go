@@ -72,6 +72,7 @@ func main() {
 	// Session Management & Token Management
 	mux.HandleFunc("GET /logout", oauthHandler.Logout)
 	mux.HandleFunc("POST /revoke", oauthHandler.Revoke)
+	mux.HandleFunc("POST /introspect", oauthHandler.Introspect)
 
 	adminHandler := handlers.NewAdminHandler(userRepo, clientRepo)
 	

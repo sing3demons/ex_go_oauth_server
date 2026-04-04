@@ -519,3 +519,54 @@ func (h *OAuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 }
+
+// Introspect (POST /introspect) ตรวจสอบสถานะของ Token ควบคู่ตาม RFC 7662
+func (h *OAuthHandler) Introspect(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	token := r.FormValue("token")
+	if token == "" {
+		http.Error(w, "missing_token", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// รันผ่านระบบ Validate
+	claims, err := h.oauthService.ValidateAccessToken(r.Context(), token)
+	if err != nil {
+		// RFC กำหนดไว้ว่าถ้า Token ผิด ให้ตอบแค่ active: false
+		json.NewEncoder(w).Encode(map[string]bool{"active": false})
+		return
+	}
+
+	// ถ้าถูกต้อง นำข้อมูลกลับมาแพคตามมาตรฐาน
+	resp := map[string]interface{}{
+		"active": true,
+		"iss":    claims["iss"],
+		"sub":    claims["sub"],
+		"aud":    claims["aud"],
+		"exp":    claims["exp"],
+		"iat":    claims["iat"],
+	}
+
+	// แปลง Array Scopes กลับเป็นวรรค (Space-separated)
+	if scopesRaw, ok := claims["scopes"].([]interface{}); ok {
+		var scopes []string
+		for _, s := range scopesRaw {
+			if str, ok := s.(string); ok {
+				scopes = append(scopes, str)
+			}
+		}
+		resp["scope"] = strings.Join(scopes, " ")
+	}
+
+	if clientID, ok := claims["client_id"].(string); ok {
+		resp["client_id"] = clientID
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
