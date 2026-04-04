@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -18,14 +19,16 @@ import (
 type OAuthHandler struct {
 	oauthService     *services.OAuthService
 	userRepo         ports.UserRepository
+	clientRepo       ports.ClientRepository
 	sessionCache     ports.SessionCache
 	transactionCache ports.TransactionCache
 }
 
-func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRepository, sessionCache ports.SessionCache, transactionCache ports.TransactionCache) *OAuthHandler {
+func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRepository, clientRepo ports.ClientRepository, sessionCache ports.SessionCache, transactionCache ports.TransactionCache) *OAuthHandler {
 	return &OAuthHandler{
 		oauthService:     oauthService,
 		userRepo:         userRepo,
+		clientRepo:       clientRepo,
 		sessionCache:     sessionCache,
 		transactionCache: transactionCache,
 	}
@@ -37,15 +40,24 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	tid := query.Get("tid")
 	errMsg := query.Get("error")
 
-	// 1. ถ้าไม่มี sid หรือ tid พ่วงมา แปลว่าเป็นคำขอรอบแรกจาก Client App
-	if sid == "" || tid == "" {
+	// ดึง sid จาก Cookie ถ้าหาไม่เจอใน URL
+	if sid == "" {
+		if cookie, err := r.Cookie("oidc_session"); err == nil {
+			sid = cookie.Value
+		}
+	}
+
+	// 1. ถ้าไม่มี tid แสดงว่าเป็นการเริ่ม OAuth Flow ใหม่
+	if tid == "" {
 		responseType := query.Get("response_type")
 		if responseType != "code" {
 			http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
 			return
 		}
 
-		sid = uuid.New().String()
+		if sid == "" {
+			sid = uuid.New().String()
+		}
 		tid = uuid.New().String()
 
 		tx := &models.AuthTransaction{
@@ -72,7 +84,15 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Render Unified Auth Page 
+	// 2.5 ตรวจสอบว่ามี sid อยู่ในระบบ (Log in ค้างไว้) หรือไม่
+	session, _ := h.sessionCache.GetSession(r.Context(), sid)
+	if session != nil {
+		// ถ้าเคย Login แล้ว พาไปหน้า Consent ทันที
+		http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		return
+	}
+
+	// 3. Render Unified Auth Page
 	tmpl, err := template.ParseFiles("templates/auth.html")
 	if err != nil {
 		http.Error(w, "Failed to load template", http.StatusInternalServerError)
@@ -117,7 +137,22 @@ func (h *OAuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.completeAuth(w, r, sid, tid, user.ID)
+	sessionInfo := &models.SessionInfo{
+		UserID:     user.ID,
+		LoggedInAt: time.Now(),
+	}
+	h.sessionCache.SetSession(r.Context(), sid, sessionInfo, 24*time.Hour)
+
+	// ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oidc_session",
+		Value:    sid,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   86400,
+	})
+
+	http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 }
 
 func (h *OAuthHandler) RegisterSubmit(w http.ResponseWriter, r *http.Request) {
@@ -159,17 +194,25 @@ func (h *OAuthHandler) RegisterSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// สร้างสำเร็จ ก็ให้ Login ผ่านต่อเลย
-	h.completeAuth(w, r, sid, tid, user.ID)
-}
-
-func (h *OAuthHandler) completeAuth(w http.ResponseWriter, r *http.Request, sid, tid, userID string) {
-	// 1. ลงทะเบียนว่า SessionID นี้มีคนล็อกอินแล้ว 
 	sessionInfo := &models.SessionInfo{
-		UserID:     userID,
+		UserID:     user.ID,
 		LoggedInAt: time.Now(),
 	}
 	h.sessionCache.SetSession(r.Context(), sid, sessionInfo, 24*time.Hour)
 
+	// ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oidc_session",
+		Value:    sid,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   86400,
+	})
+
+	http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+}
+
+func (h *OAuthHandler) completeAuth(w http.ResponseWriter, r *http.Request, sid, tid, userID string) {
 	// 2. ดึง Transaction ก้อนเดิมออกมา
 	tx, err := h.transactionCache.GetTransaction(r.Context(), tid)
 	if err != nil {
@@ -211,6 +254,100 @@ func (h *OAuthHandler) completeAuth(w http.ResponseWriter, r *http.Request, sid,
 	http.Redirect(w, r, redirectURL.String(), http.StatusFound)
 }
 
+func (h *OAuthHandler) ConsentUI(w http.ResponseWriter, r *http.Request) {
+	sid := r.URL.Query().Get("sid")
+	tid := r.URL.Query().Get("tid")
+
+	if sid == "" || tid == "" {
+		http.Error(w, "Missing session or transaction", http.StatusBadRequest)
+		return
+	}
+
+	session, err := h.sessionCache.GetSession(r.Context(), sid)
+	if err != nil || session == nil {
+		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		return
+	}
+
+	tx, err := h.transactionCache.GetTransaction(r.Context(), tid)
+	if err != nil || tx == nil {
+		http.Error(w, "Transaction expired", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.clientRepo.FindByID(r.Context(), tx.ClientID)
+	if err != nil || client == nil {
+		http.Error(w, "Invalid Client", http.StatusBadRequest)
+		return
+	}
+
+	tmpl, err := template.ParseFiles("templates/consent.html")
+	if err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		return
+	}
+
+	data := struct {
+		SID        string
+		TID        string
+		ClientName string
+		Scopes     []string
+	}{
+		SID:        sid,
+		TID:        tid,
+		ClientName: client.ClientName,
+		Scopes:     tx.Scopes,
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	tmpl.Execute(w, data)
+}
+
+func (h *OAuthHandler) ConsentSubmit(w http.ResponseWriter, r *http.Request) {
+	sid := r.FormValue("sid")
+	tid := r.FormValue("tid")
+	action := r.FormValue("action")
+
+	if sid == "" || tid == "" {
+		http.Error(w, "Missing mapping", http.StatusBadRequest)
+		return
+	}
+
+	session, err := h.sessionCache.GetSession(r.Context(), sid)
+	if err != nil || session == nil {
+		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		return
+	}
+
+	tx, err := h.transactionCache.GetTransaction(r.Context(), tid)
+	if err != nil || tx == nil {
+		http.Error(w, "Transaction expired", http.StatusBadRequest)
+		return
+	}
+
+	if action == "deny" {
+		h.transactionCache.DeleteTransaction(r.Context(), tid)
+		if tx.RedirectURI == "" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
+			return
+		}
+
+		redirectURL, _ := url.Parse(tx.RedirectURI)
+		q := redirectURL.Query()
+		q.Set("error", "access_denied")
+		if tx.State != "" {
+			q.Set("state", tx.State)
+		}
+		redirectURL.RawQuery = q.Encode()
+		http.Redirect(w, r, redirectURL.String(), http.StatusFound)
+		return
+	}
+
+	// ถ้ากด Allow อนุญาตให้ดำเนินการสร้าง Authorization Code
+	h.completeAuth(w, r, sid, tid, session.UserID)
+}
+
 // Token (POST /token) เปิดรับให้ Backend เอารหัสมาแลกเป็นตัว JWT
 func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -227,18 +364,28 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	clientID := r.FormValue("client_id")
 	clientSecret := r.FormValue("client_secret")
-	if clientID == "" {
-		clientID, clientSecret, _ = r.BasicAuth()
+
+	// Postman บางทีส่ง client_id มาใน Body แต่ส่ง Secret ไปใน Basic Auth
+	basicID, basicSecret, ok := r.BasicAuth()
+	if ok {
+		if clientID == "" {
+			clientID = basicID
+		}
+		if clientSecret == "" {
+			clientSecret = basicSecret
+		}
 	}
 
 	var response map[string]interface{}
 	var err error
 
-	if grantType == "authorization_code" {
+	switch grantType {
+	case "authorization_code":
 		redirectURI := r.FormValue("redirect_uri")
 		codeVerifier := r.FormValue("code_verifier")
+		fmt.Println("Token", grantType)
 		response, err = h.oauthService.ExchangeToken(r.Context(), code, clientID, clientSecret, redirectURI, codeVerifier)
-	} else if grantType == "refresh_token" {
+	case "refresh_token":
 		refreshToken := r.FormValue("refresh_token")
 		response, err = h.oauthService.RefreshToken(r.Context(), refreshToken, clientID, clientSecret)
 	}

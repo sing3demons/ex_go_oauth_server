@@ -59,10 +59,12 @@ func main() {
 	mux.HandleFunc("GET /.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	mux.HandleFunc("GET /jwks.json", discoveryHandler.JWKS)
 
-	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, sessionCache, transactionCache)
+	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, clientRepo, sessionCache, transactionCache)
 	mux.HandleFunc("GET /authorize", oauthHandler.Authorize)
 	mux.HandleFunc("POST /login", oauthHandler.LoginSubmit)
 	mux.HandleFunc("POST /register", oauthHandler.RegisterSubmit)
+	mux.HandleFunc("GET /consent", oauthHandler.ConsentUI)
+	mux.HandleFunc("POST /consent", oauthHandler.ConsentSubmit)
 	mux.HandleFunc("POST /token", oauthHandler.Token)
 	mux.HandleFunc("GET /userinfo", oauthHandler.UserInfo)
 	mux.HandleFunc("POST /userinfo", oauthHandler.UserInfo)

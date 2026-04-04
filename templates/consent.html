@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authorize App</title>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f1f5f9;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .consent-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }
+        h2 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 1.5rem;
+            color: #38bdf8;
+        }
+        p.subtitle {
+            color: #94a3b8;
+            font-size: 0.95rem;
+            margin-bottom: 24px;
+        }
+        .scopes-list {
+            text-align: left;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 32px;
+        }
+        .scopes-list strong {
+            display: block;
+            margin-bottom: 12px;
+            color: #e2e8f0;
+        }
+        .scopes-list ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .scopes-list li {
+            position: relative;
+            padding-left: 24px;
+            margin-bottom: 8px;
+            color: #cbd5e1;
+            font-size: 0.9rem;
+        }
+        .scopes-list li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #10b981;
+            font-weight: bold;
+        }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+        }
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        button.allow {
+            background-color: #3b82f6;
+            color: white;
+        }
+        button.allow:hover {
+            background-color: #2563eb;
+            transform: translateY(-1px);
+        }
+        button.deny {
+            background-color: transparent;
+            color: #94a3b8;
+            border: 1px solid #475569;
+        }
+        button.deny:hover {
+            background-color: rgba(71, 85, 105, 0.2);
+            color: #f1f5f9;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="consent-card">
+        <h2>{{ .ClientName }}</h2>
+        <p class="subtitle">wants to access your account</p>
+
+        <div class="scopes-list">
+            <strong>Requested Permissions:</strong>
+            <ul>
+                {{ range .Scopes }}
+                    {{ if eq . "openid" }}
+                        <li>Verify your identity</li>
+                    {{ else if eq . "profile" }}
+                        <li>View your basic profile information</li>
+                    {{ else if eq . "email" }}
+                        <li>View your email address</li>
+                    {{ else if eq . "offline_access" }}
+                        <li>Access your data when you're not actively using the app</li>
+                    {{ else }}
+                        <li>Access your {{ . }}</li>
+                    {{ end }}
+                {{ end }}
+            </ul>
+        </div>
+
+        <form method="POST" action="/consent">
+            <input type="hidden" name="sid" value="{{ .SID }}">
+            <input type="hidden" name="tid" value="{{ .TID }}">
+            <div class="btn-group">
+                <button type="submit" name="action" value="deny" class="deny">Cancel</button>
+                <button type="submit" name="action" value="allow" class="allow">Allow Access</button>
+            </div>
+        </form>
+    </div>
+
+</body>
+</html>

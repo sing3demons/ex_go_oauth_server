@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -107,22 +108,29 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 
 func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, clientSecret, redirectURI, codeVerifier string) (map[string]interface{}, error) {
 	// 1. ค้นหา Auth Code จาก Redis
+	fmt.Println("==================")
+	fmt.Printf("Requesting Exchange for Code: %s, ClientID: %s, RedirectURI: %s\n", code, clientID, redirectURI)
+
 	info, err := s.authCache.GetCode(ctx, code)
 	if err != nil || info == nil {
+		fmt.Printf("GetCode Error: %v, info is nil: %v\n", err, info == nil)
 		return nil, errors.New("invalid_grant")
 	}
-	
+
 	// 2. ลบรหัสทิ้งทันที เพื่อป้องกันการใช้งานซ้ำซ้อน (Replay Attack)
 	defer s.authCache.DeleteCode(ctx, code)
 
 	// 3. ตรวจสอบความถูกต้องของคำขอ
 	if info.ClientID != clientID {
+		fmt.Printf("ClientID mismatch: expected %s, got %s\n", info.ClientID, clientID)
 		return nil, errors.New("invalid_client")
 	}
 	if info.RedirectURI != redirectURI {
+		fmt.Printf("RedirectURI mismatch: expected '%s', got '%s'\n", info.RedirectURI, redirectURI)
 		return nil, errors.New("invalid_grant")
 	}
 	if time.Now().After(info.ExpiresAt) {
+		fmt.Println("Auth code expired")
 		return nil, errors.New("invalid_grant_expired")
 	}
 
@@ -210,18 +218,24 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	hasProfile := false
 
 	for _, scope := range info.Scopes {
-		if scope == "openid" { hasOpenID = true }
-		if scope == "email" { hasEmail = true }
-		if scope == "profile" { hasProfile = true }
+		if scope == "openid" {
+			hasOpenID = true
+		}
+		if scope == "email" {
+			hasEmail = true
+		}
+		if scope == "profile" {
+			hasProfile = true
+		}
 	}
 
 	if hasOpenID {
 		idClaims := jwt.MapClaims{
-			"iss":   s.cfg.Issuer,
-			"sub":   info.UserID,
-			"aud":   clientID,
-			"exp":   now.Add(1 * time.Hour).Unix(),
-			"iat":   now.Unix(),
+			"iss": s.cfg.Issuer,
+			"sub": info.UserID,
+			"aud": clientID,
+			"exp": now.Add(1 * time.Hour).Unix(),
+			"iat": now.Unix(),
 		}
 		// ป้อน Nonce คืนเข้าไปเพื่อปิดกั้น CSRF Attack
 		if info.Nonce != "" {
@@ -254,6 +268,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 
 	return response, nil
 }
+
 // RefreshToken exchanges a valid refresh token for a new set of access/id tokens and optionally a new refresh token.
 func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string, clientID string, clientSecret string) (map[string]interface{}, error) {
 	// 1. Validate Client
