@@ -34,13 +34,14 @@ func main() {
 	keyCache := redis_store.NewKeyCache(redisClient)
 
 	// Init Adapters for OAuth entities
-	_ = mongo_store.NewUserRepository(db)
-	_ = mongo_store.NewClientRepository(db)
-	_ = redis_store.NewAuthCodeCache(redisClient)
-	_ = redis_store.NewSessionCache(redisClient)
+	userRepo := mongo_store.NewUserRepository(db)
+	clientRepo := mongo_store.NewClientRepository(db)
+	authCodeCache := redis_store.NewAuthCodeCache(redisClient)
+	sessionCache := redis_store.NewSessionCache(redisClient)
 
 	// Init Core Key Service
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount)
+	oauthService := services.NewOAuthService(clientRepo, authCodeCache, keyService, cfg)
 
 	// Start Key generation or fetching
 	ctx := context.Background()
@@ -55,6 +56,12 @@ func main() {
 	discoveryHandler := handlers.NewDiscoveryHandler(cfg, keyService)
 	mux.HandleFunc("GET /.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	mux.HandleFunc("GET /jwks.json", discoveryHandler.JWKS)
+
+	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, sessionCache)
+	mux.HandleFunc("GET /authorize", oauthHandler.Authorize)
+	mux.HandleFunc("GET /login", oauthHandler.LoginPage)
+	mux.HandleFunc("POST /login", oauthHandler.LoginSubmit)
+	mux.HandleFunc("POST /token", oauthHandler.Token)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
