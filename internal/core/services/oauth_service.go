@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"time"
@@ -37,7 +39,7 @@ func NewOAuthService(
 	}
 }
 
-func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, redirectURI, nonce string, scopes []string) (string, error) {
+func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, redirectURI, nonce string, scopes []string, codeChallenge, codeChallengeMethod string) (string, error) {
 	// 1. ตรวจสอบความมีอยู่จริงของ Client ในระบบ (MongoDB)
 	client, err := s.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
@@ -79,12 +81,14 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 	// 4. บันทึก Code ลงใน Redis พร้อมตั้งทำลายตัวเองเมื่อครบ 10 นาที
 	ttl := 10 * time.Minute
 	info := &models.AuthCodeInfo{
-		ClientID:    clientID,
-		UserID:      userID,
-		RedirectURI: redirectURI,
-		Scopes:      scopes,
-		Nonce:       nonce,
-		ExpiresAt:   time.Now().Add(ttl),
+		ClientID:            clientID,
+		UserID:              userID,
+		RedirectURI:         redirectURI,
+		Scopes:              scopes,
+		Nonce:               nonce,
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
+		ExpiresAt:           time.Now().Add(ttl),
 	}
 	if err := s.authCache.SetCode(ctx, code, info, ttl); err != nil {
 		return "", err
@@ -93,7 +97,7 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 	return code, nil
 }
 
-func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, redirectURI string) (map[string]interface{}, error) {
+func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, redirectURI, codeVerifier string) (map[string]interface{}, error) {
 	// 1. ค้นหา Auth Code จาก Redis
 	info, err := s.authCache.GetCode(ctx, code)
 	if err != nil || info == nil {
@@ -112,6 +116,25 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, redire
 	}
 	if time.Now().After(info.ExpiresAt) {
 		return nil, errors.New("invalid_grant_expired")
+	}
+
+	// 3.5 PKCE Verification
+	if info.CodeChallenge != "" {
+		if codeVerifier == "" {
+			return nil, errors.New("invalid_request_missing_code_verifier")
+		}
+		if info.CodeChallengeMethod == "S256" {
+			h := sha256.New()
+			h.Write([]byte(codeVerifier))
+			hash := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+			if hash != info.CodeChallenge {
+				return nil, errors.New("invalid_grant_pkce_mismatch")
+			}
+		} else { // default to plain
+			if codeVerifier != info.CodeChallenge {
+				return nil, errors.New("invalid_grant_pkce_mismatch")
+			}
+		}
 	}
 
 	// 4. ไปคว้ากุญแจ Signature (RSA) จาก KeyService (Redis/Mongo)

@@ -37,6 +37,8 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	scopeStr := query.Get("scope")
 	state := query.Get("state")
 	nonce := query.Get("nonce")
+	codeChallenge := query.Get("code_challenge")
+	codeChallengeMethod := query.Get("code_challenge_method")
 
 	if responseType != "code" {
 		http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
@@ -61,7 +63,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 
 	// ถ้าพก Session มาครบถ้วนตามกฎหมาย ให้ออก Auth Code ได้เลย!
 	scopes := strings.Split(scopeStr, " ")
-	code, err := h.oauthService.GenerateAuthCode(r.Context(), clientID, session.UserID, redirectURI, nonce, scopes)
+	code, err := h.oauthService.GenerateAuthCode(r.Context(), clientID, session.UserID, redirectURI, nonce, scopes, codeChallenge, codeChallengeMethod)
 	if err != nil {
 		http.Error(w, "Failed to authorize: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -175,9 +177,10 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	clientID := r.FormValue("client_id")
 	redirectURI := r.FormValue("redirect_uri")
+	codeVerifier := r.FormValue("code_verifier")
 
 	// สั่ง Oauth เดินเรื่องแจกแหวน 
-	response, err := h.oauthService.ExchangeToken(r.Context(), code, clientID, redirectURI)
+	response, err := h.oauthService.ExchangeToken(r.Context(), code, clientID, redirectURI, codeVerifier)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest) // ตามหลักต้องเป็น 400 เสมอ
