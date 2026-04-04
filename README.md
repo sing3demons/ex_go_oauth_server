@@ -16,24 +16,30 @@
 
 โปรเจกต์นี้ยึดรูปแบบ Standard Layout และเน้นแยกส่วนโค้ดเพื่อให้อ่านง่าย:
 
-```text
-.
 ├── cmd/
+│   ├── client/                  # [NEW] แอปทดสอบ Ralying Party (ยิงขอดู OIDC) พอร์ต 3000
+│   │   └── main.go              
 │   └── server/
-│       └── main.go              # จุดเริ่มต้นโปรแกรม (Entry point) ควบคุม Config และ Router
+│       └── main.go              # จุดเริ่มต้นโปรแกรม OIDC Server พอร์ต 8080
 ├── internal/
-│   ├── config/                  # ดึงและจัดการตัวแปร Environment Variables
-│   ├── adapters/                # ตัวเชื่อมต่อไปยังฐานข้อมูลและแคช
-│   │   ├── mongo_store/         # ตัวจัดการ Client ของ MongoDB
-│   │   └── redis_store/         # ตัวจัดการ Client ของ Redis
-│   ├── core/                    # **ส่วนกลาง** Business Logic ของ OIDC และ Model ต่างๆ (รอสร้าง)
+│   ├── config/                  # จัดการตัวแปร Environment Variables
+│   ├── adapters/                # เชื่อมต่อ Database และ Redis
+│   │   ├── mongo_store/         # User, Client, RefreshToken, RSA Keys
+│   │   └── redis_store/         # Cache (AuthCode, Session, Transaction)
+│   ├── core/                    # **ส่วนกลาง** Business Logic ของ OIDC และ Model
+│   │   ├── models/              
+│   │   ├── ports/               
+│   │   └── services/            # บริการต่างๆ (OAuthService, KeyService)
 │   └── handlers/                # หน้าต่างรับ Request (HTTP Handlers)
-│       └── discovery.go         # API สำหรับ Discovery และแจกกุญแจ
+│       ├── admin.go             # จัดการระบบขึ้นทะเบียน Client
+│       ├── discovery.go         # API สำหรับ Discovery และ JWKS
+│       ├── oauth.go             # API คุมการ Login, Token, Consent ฯลฯ
+│       └── register.go          # ระบบสมัครสมาชิก
 ├── pkg/
-│   └── crypto/                  # เครื่องมือ Helper (เช่นระบบสร้าง RSA Key คู่สำหรับระบบ JWT)
-├── docker-compose.yml           # ไฟล์ตั้งค่าสำหรับเปิด Base Infrastructures แบบ Local (Mongo/Redis)
+│   └── crypto/                  # เครื่องมือ Helper (ระบบสร้าง RSA Key)
+├── templates/                   # หน้าจอ UI ต่างๆ (Login, Consent, Admin)
+├── docker-compose.yml           # ไฟล์ตั้งค่า Docker ประกอบร่าง Mongo/Redis
 └── go.mod / go.sum
-```
 
 ---
 
@@ -44,7 +50,6 @@
    ```bash
    docker-compose up -d
    ```
-   *ตรวจสอบว่า Mongo รันที่พอร์ต `27017` และ Redis รันที่พอร์ต `6379` ครบถ้วน*
 
 2. **ดาวน์โหลด Dependencies ของ Go**
    ```bash
@@ -52,10 +57,18 @@
    ```
 
 3. **สั่งรันเซิร์ฟเวอร์หลัก (OIDC Server)**
-   สามารถรันคำสั่งเริ่มเซิร์ฟเวอร์ (ค่าเริ่มต้นจะอยู่ที่พอร์ต `8080`):
+   เปิด Terminal ของคุณและสั่งรันขุมพลังหลักที่เตรียมมา:
    ```bash
    go run cmd/server/main.go
    ```
+   *ใช้งานได้ที่ `http://localhost:8080/admin/dashboard` (User/Pass: `admin`/`admin_password`)*
+
+4. **ทดสอบกับ Client App ตัวอย่าง**
+   เมื่อสร้าง Client จากหน้า Admin Dashboard ของเซิร์ฟเวอร์หลักแล้ว ให้นำ `client_id` และ `client_secret` เข้าไปเปลี่ยนในบรรทัดแรกๆ ของโค้ด `cmd/client/main.go` จากนั้น... เปิด Terminal หน้าต่างที่สองแล้วสั่งรันขนานกันไปเลย:
+   ```bash
+   go run cmd/client/main.go
+   ```
+   *ใช้งานฝั่งแอปได้ที่ `http://localhost:3000`*
 
 ---
 
@@ -101,10 +114,29 @@ sequenceDiagram
 
 ## 🌐 Endpoints ปัจจุบัน (API อ้างอิง)
 
-| Method | Endpoint | รายละเอียด / หน้าที่ |
-| --- | --- | --- |
-| `GET` | `/.well-known/openid-configuration` | **OIDC Discovery**: แสดงค่า Metadata และความสามารถที่ Server นี้รองรับ เพื่อให้ระบบอื่น (Client) ทราบว่าเราเป็นใคร |
-| `GET` | `/jwks.json` | **JWKS**: ปล่อย Public Keys (รูปแบบ JSON Web Key Set) เอาไว้ให้ Client ตรวจสอบว่า ID Token (JWT) ถูกแจกออกมาจากเซิร์ฟเวอร์นี้จริงๆ โดยไม่ถูกปลอมแปลง |
-| `GET` | `/health` | ตรวจสอบสถานะการทำงานของ Web Server เบื้องต้น |
+### 📌 Discovery & Metadata
+| Method | Endpoint | รายละเอียด |
+| :-: | --- | --- |
+| `GET` | `/.well-known/openid-configuration` | **OIDC Discovery**: แสดงค่า Metadata และความสามารถที่ Server นี้รองรับ |
+| `GET` | `/jwks.json` | **JWKS**: ปล่อย Public Keys สำหรับให้ Client ตรวจสอบลายเซ็น JWT ด้วยตัวเอง |
 
-*(หมายเหตุ: ส่วนที่เกี่ยวกับการ Auth พอร์ตหลัก เช่น `/authorize`, `/token` และฐานข้อมูล กำลังอยู่ในช่วงระหว่างการพัฒนาครับ)*
+### 🔐 OAuth & OIDC Core
+| Method | Endpoint | รายละเอียด |
+| :-: | --- | --- |
+| `GET` | `/authorize` | จุดเริ่มต้นของ Authorization Code Flow รองรับพารามิเตอร์ PKCE |
+| `POST` | `/login` / `/register` | ส่งคำขอเข้าสู่ระบบหรือสมัครสมาชิกเพื่อแลกเปลี่ยน Transaction ID |
+| `GET/POST`| `/consent` | หน้าจอยินยอมสิทธิ์ (Consent Screen) รับรองการยิง Token กลับไปให้แพลตฟอร์มปลายทาง |
+| `POST` | `/token` | แลกเปลี่ยน Authorization Code ให้กลายเป็นชุด `access_token`, `id_token` (JWT) และ `refresh_token` |
+| `GET` | `/userinfo` | ปกป้องโปรไฟล์ผู้ใช้งานด้วย Access Token เพื่อตอบกลับตามมาตรฐาน OIDC |
+
+### 🛑 Session & Security
+| Method | Endpoint | รายละเอียด |
+| :-: | --- | --- |
+| `POST` | `/introspect` | ระบบเครื่องสแกนลายเซ็น (Introspection ตาม RFC 7662) เอาไว้ให้ API ข้างนอกยิงมาตรวจว่า Token นี้ของจริงและหมดอายุไปหรือยัง |
+| `GET` | `/logout` | **RP-Initiated Logout**: ลงชื่อออกจากระบบขุดรากถอนโคนของ Session ภายใน OIDC ทั้งหมด |
+| `POST` | `/revoke` | ทำลายล้าง `refresh_token` เก่า (ตาม RFC 7009) เวลาแอปฝั่งลูกข่ายต้องการปิดระบบ |
+
+### 🛠️ Admin Zone
+| Method | Endpoint | รายละเอียด |
+| :-: | --- | --- |
+| `GET` | `/admin/dashboard` | หน้าแสดงรายการและการสั่งสร้าง Client Application ใหม่ ปกป้องด้วย Basic Auth |

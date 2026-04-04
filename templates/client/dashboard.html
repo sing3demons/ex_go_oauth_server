@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Dashboard</title>
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 40px;
+            color: #1f2937;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .btn-logout {
+            padding: 10px 20px;
+            background: #ef4444;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        .btn-logout:hover {
+            background: #dc2626;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+        }
+
+        h2 {
+            margin-top: 0;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 10px;
+            font-size: 20px;
+            color: #374151;
+        }
+
+        pre {
+            background: #111827;
+            color: #10b981;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Dashboard</h1>
+        <a href="/logout" class="btn-logout">Logout</a>
+    </div>
+
+    <div class="card">
+        <h2>User Profile (From /userinfo)</h2>
+        <pre>{{ .user | json }}</pre>
+    </div>
+
+    <div class="card">
+        <h2>Tokens Received (From /token)</h2>
+        <pre>{{ .tokens | json }}</pre>
+    </div>
+</body>
+</html>
