@@ -2,7 +2,10 @@ package logger
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/sing3demons/tr_02_oauth/pkg/errors"
 )
 
 // SummaryParamsType defines parameters specific to summary logs
@@ -16,9 +19,9 @@ type SummaryParamsType struct {
 
 // SummaryLogger handles the emission of Summary logs (stripping detail-level metadata)
 type SummaryLogger struct {
-	baseLogger BaseLoggerInterface
+	baseLogger   BaseLoggerInterface
 	customLogger *CustomLogger
-	util       LoggerUtil
+	util         LoggerUtil
 }
 
 // LoggerUtil interface to mock or provide timestamps and service time offsets
@@ -29,6 +32,7 @@ type LoggerUtil interface {
 type DefaultLoggerUtil struct {
 	BeginTime time.Time
 }
+
 func (d *DefaultLoggerUtil) GetBeginTime() time.Time {
 	return d.BeginTime
 }
@@ -40,13 +44,13 @@ func NewSummaryLogger(base BaseLoggerInterface, detailLogger *CustomLogger, util
 	return &SummaryLogger{
 		baseLogger:   base,
 		customLogger: detailLogger,
-		util:       util,
+		util:         util,
 	}
 }
 
 func (s *SummaryLogger) Flush() {
 	dto := s.customLogger.GetLogDto()
-	
+
 	// Inject summary properties
 	dto.RecordType = "summary"
 	dto.DateTime = time.Now().Format("2006-01-02 15:04:05.000")
@@ -78,7 +82,7 @@ func (s *SummaryLogger) Flush() {
 	s.baseLogger.LogInfo(dto)
 }
 
-func (s *SummaryLogger) FlushError(errData map[string]any, stack string) {
+func (s *SummaryLogger) FlushError(err *errors.Error) {
 	dto := s.customLogger.GetLogDto()
 
 	// Inject summary properties
@@ -86,34 +90,14 @@ func (s *SummaryLogger) FlushError(errData map[string]any, stack string) {
 	dto.DateTime = time.Now().Format("2006-01-02 15:04:05.000")
 	dto.ServiceTime = time.Since(s.util.GetBeginTime()).Milliseconds()
 
-	// Overwrite properties based on errData if available
-	if val, ok := errData["status"]; ok {
-		dto.AppResultHttpStatus = getString(val)
-	} else {
-		dto.AppResultHttpStatus = "500"
-	}
+	errData := err.LogDependencyMetadata()
 
-	if val, ok := errData["resultType"]; ok {
-		dto.AppResultType = getString(val)
-	} else {
-		dto.AppResultType = "SystemError"
-	}
+	dto.AppResultHttpStatus = fmt.Sprintf("%d", errData.AppResultHttpStatus)
 
-	if val, ok := errData["severity"]; ok {
-		dto.Severity = getString(val)
-	} else {
-		dto.Severity = "Notice"
-	}
-
-	if val, ok := errData["code"]; ok {
-		dto.AppResultCode = getString(val)
-	} else {
-		dto.AppResultCode = "50000"
-	}
-
-	if val, ok := errData["message"]; ok {
-		dto.AppResult = getString(val)
-	}
+	dto.AppResultType = errData.AppResultType
+	dto.Severity = errData.Severity
+	dto.AppResultCode = errData.AppResultCode
+	dto.AppResult = errData.AppResult
 
 	// Update the message payload if needed (usually empty for summary error or populated with basic log message)
 	b, _ := json.Marshal(errData)
@@ -121,7 +105,7 @@ func (s *SummaryLogger) FlushError(errData map[string]any, stack string) {
 
 	s.clearDetailedFields(&dto)
 
-	s.baseLogger.LogError(dto, stack)
+	s.baseLogger.LogError(dto, err.Error())
 }
 
 func getString(v any) string {

@@ -1,0 +1,362 @@
+package kp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"encoding/xml"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/sing3demons/tr_02_oauth/pkg/errors"
+	"github.com/sing3demons/tr_02_oauth/pkg/logAction"
+	"github.com/sing3demons/tr_02_oauth/pkg/logger"
+	"github.com/sing3demons/tr_02_oauth/pkg/middleware"
+	"github.com/sing3demons/tr_02_oauth/pkg/mlog"
+)
+
+const MaxBodySize = 10 << 20 // 10 MB
+type ContentType string
+
+const (
+	ContentTypeJSON          ContentType = "application/json"
+	ContentTypeXML           ContentType = "application/xml"
+	ContentTypeForm          ContentType = "application/x-www-form-urlencoded"
+	ContentTypeMultipartForm ContentType = "multipart/form-data"
+	ContentTypePlainText     ContentType = "text/plain"
+)
+
+type CtxKey string
+
+const (
+	SessionID     CtxKey = "x-session-id"
+	TransactionID CtxKey = "x-transaction-id"
+)
+
+type Ctx struct {
+	Req *http.Request
+	Res http.ResponseWriter
+	log *logger.CustomLogger
+	cmd string
+}
+
+func NewCtx(r *http.Request, w http.ResponseWriter) *Ctx {
+	_log := mlog.L(r.Context())
+	return &Ctx{Req: r, Res: w, log: _log}
+}
+func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.CustomLogger {
+	c.cmd = cmd
+	// copy body
+	body := make(map[string]any)
+	const MaxBodySize = 10 << 20 // 10 MB
+	limitedReader := io.LimitReader(c.Req.Body, MaxBodySize)
+	bodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		body = map[string]any{}
+	} else {
+		json.Unmarshal(bodyBytes, &body)
+	}
+
+	incoming := map[string]any{
+		"method":  c.Req.Method,
+		"url":     c.Req.URL.String(),
+		"headers": c.Req.Header,
+		"query":   c.Req.URL.Query(),
+		"body":    body,
+	}
+	c.log.Update("recordName", cmd)
+	c.log.Info(logAction.INBOUND("Start receiving request from API : command-> "+cmd+" | method-> "+c.Req.Method+" | path-> "+c.Req.URL.Path), incoming, maskOptions...)
+	return c.log
+}
+
+func (c *Ctx) Bind(v any) error {
+	// Only parse body for non-GET requests
+	if c.Req.Method == http.MethodGet || c.Req.Method == http.MethodHead {
+		return nil
+	}
+
+	// Get Content-Type header
+	contentType := c.Req.Header.Get("Content-Type")
+	if contentType == "" {
+		// Default to JSON if not specified
+		contentType = string(ContentTypeJSON)
+	}
+
+	// Extract base content type (remove charset, boundary, etc.)
+	baseContentType := strings.Split(contentType, ";")[0]
+	baseContentType = strings.TrimSpace(baseContentType)
+
+	// Limit body size to prevent DoS
+	limitedReader := io.LimitReader(c.Req.Body, MaxBodySize)
+	bodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return fmt.Errorf("failed to read request body: %w", err)
+	}
+
+	// Check if body exceeded limit
+	if int64(len(bodyBytes)) >= MaxBodySize {
+		return fmt.Errorf("request body too large (max %d bytes)", MaxBodySize)
+	}
+
+	// Restore body for potential re-reads (e.g., logging middleware)
+	c.Req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	// Parse based on content type
+	switch ContentType(baseContentType) {
+	case ContentTypeJSON:
+		return c.parseJSON(bodyBytes, v)
+
+	case ContentTypeXML:
+		return c.parseXML(bodyBytes, v)
+
+	case ContentTypeForm:
+		return c.parseFormURLEncoded(bodyBytes, v)
+
+	case ContentTypeMultipartForm:
+		return c.parseMultipartForm(v)
+
+	case ContentTypePlainText:
+		return c.parsePlainText(bodyBytes, v)
+
+	default:
+		return fmt.Errorf("unsupported content type: %s", contentType)
+	}
+}
+
+// parseJSON parses JSON content
+func (c *Ctx) parseJSON(bodyBytes []byte, v any) error {
+	if len(bodyBytes) == 0 {
+		return fmt.Errorf("empty JSON body")
+	}
+
+	if err := json.Unmarshal(bodyBytes, v); err != nil {
+		return fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+	return nil
+}
+
+// parseXML parses XML content
+func (c *Ctx) parseXML(bodyBytes []byte, v any) error {
+	if len(bodyBytes) == 0 {
+		return fmt.Errorf("empty XML body")
+	}
+
+	if err := xml.Unmarshal(bodyBytes, v); err != nil {
+		return fmt.Errorf("failed to unmarshal XML: %w", err)
+	}
+	return nil
+}
+
+// parseFormURLEncoded parses application/x-www-form-urlencoded content
+func (c *Ctx) parseFormURLEncoded(bodyBytes []byte, v any) error {
+	if len(bodyBytes) == 0 {
+		return fmt.Errorf("empty form body")
+	}
+
+	values, err := url.ParseQuery(string(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to parse form data: %w", err)
+	}
+
+	// Convert url.Values to the target type
+	// If v is map[string]string or map[string][]string
+	switch target := v.(type) {
+	case *map[string]string:
+		result := make(map[string]string)
+		for key, vals := range values {
+			if len(vals) > 0 {
+				result[key] = vals[0]
+			}
+		}
+		*target = result
+
+	case *map[string][]string:
+		*target = values
+
+	case *map[string]any:
+		result := make(map[string]any)
+		for key, vals := range values {
+			if len(vals) == 1 {
+				result[key] = vals[0]
+			} else {
+				result[key] = vals
+			}
+		}
+		*target = result
+
+	default:
+		// Try to convert to JSON first, then unmarshal
+		jsonData, err := json.Marshal(values)
+		if err != nil {
+			return fmt.Errorf("failed to convert form data: %w", err)
+		}
+		if err := json.Unmarshal(jsonData, v); err != nil {
+			return fmt.Errorf("failed to unmarshal form data to struct: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// parseMultipartForm parses multipart/form-data content
+func (c *Ctx) parseMultipartForm(v any) error {
+	// Parse multipart form (max 32MB in memory)
+	if err := c.Req.ParseMultipartForm(32 << 20); err != nil {
+		return fmt.Errorf("failed to parse multipart form: %w", err)
+	}
+
+	switch target := v.(type) {
+	case *map[string]string:
+		result := make(map[string]string)
+		for key, vals := range c.Req.MultipartForm.Value {
+			if len(vals) > 0 {
+				result[key] = vals[0]
+			}
+		}
+		*target = result
+
+	case *map[string][]string:
+		*target = c.Req.MultipartForm.Value
+
+	case *map[string]any:
+		result := make(map[string]any)
+		// Add form values
+		for key, vals := range c.Req.MultipartForm.Value {
+			if len(vals) == 1 {
+				result[key] = vals[0]
+			} else {
+				result[key] = vals
+			}
+		}
+		// Add file info
+		if c.Req.MultipartForm.File != nil {
+			files := make(map[string]any)
+			for key, fileHeaders := range c.Req.MultipartForm.File {
+				if len(fileHeaders) == 1 {
+					files[key] = map[string]any{
+						"filename": fileHeaders[0].Filename,
+						"size":     fileHeaders[0].Size,
+						"header":   fileHeaders[0].Header,
+					}
+				} else {
+					fileList := make([]map[string]any, len(fileHeaders))
+					for i, fh := range fileHeaders {
+						fileList[i] = map[string]any{
+							"filename": fh.Filename,
+							"size":     fh.Size,
+							"header":   fh.Header,
+						}
+					}
+					files[key] = fileList
+				}
+			}
+			result["_files"] = files
+		}
+		*target = result
+
+	default:
+		return fmt.Errorf("unsupported type for multipart form data")
+	}
+
+	return nil
+}
+
+// parsePlainText parses plain text content
+func (c *Ctx) parsePlainText(bodyBytes []byte, v any) error {
+	switch target := v.(type) {
+	case *string:
+		*target = string(bodyBytes)
+	case *[]byte:
+		*target = bodyBytes
+	default:
+		return fmt.Errorf("plain text can only be parsed into *string or *[]byte")
+	}
+	return nil
+}
+
+// GetFile retrieves a file from multipart form
+func (c *Ctx) GetFile(name string) (*multipart.FileHeader, error) {
+	if c.Req.MultipartForm == nil {
+		if err := c.Req.ParseMultipartForm(32 << 20); err != nil {
+			return nil, fmt.Errorf("failed to parse multipart form: %w", err)
+		}
+	}
+
+	files := c.Req.MultipartForm.File[name]
+	if len(files) == 0 {
+		return nil, fmt.Errorf("file %s not found", name)
+	}
+
+	return files[0], nil
+}
+
+// GetFiles retrieves all files from multipart form with the given name
+func (c *Ctx) GetFiles(name string) ([]*multipart.FileHeader, error) {
+	if c.Req.MultipartForm == nil {
+		if err := c.Req.ParseMultipartForm(32 << 20); err != nil {
+			return nil, fmt.Errorf("failed to parse multipart form: %w", err)
+		}
+	}
+
+	files := c.Req.MultipartForm.File[name]
+	if len(files) == 0 {
+		return nil, fmt.Errorf("files %s not found", name)
+	}
+
+	return files, nil
+}
+func (c *Ctx) Context() context.Context {
+	return c.Req.Context()
+}
+
+func (c *Ctx) Done() <-chan struct{} {
+	return c.Context().Done()
+}
+func (c *Ctx) Err() error {
+	return c.Context().Err()
+}
+func (c *Ctx) Deadline() (time.Time, bool) {
+	return c.Context().Deadline()
+}
+func (c *Ctx) Value(key any) any {
+	return c.Context().Value(key)
+}
+
+func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
+	c.Res.Header().Set("Content-Type", "application/json")
+	c.Res.WriteHeader(code)
+	json.NewEncoder(c.Res).Encode(v)
+
+	outgoing := map[string]any{
+		"status": code,
+		"body":   v,
+		"header": c.Res.Header(),
+	}
+	c.log.Info(logAction.OUTBOUND("response: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)), outgoing, maskOptions...)
+	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
+	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+	summaryLogger.Flush()
+	return nil
+}
+
+func (c *Ctx) JsonError(err *errors.Error) error {
+	c.Res.Header().Set("Content-Type", "application/json")
+	c.Res.WriteHeader(err.LogDependencyMetadata().AppResultHttpStatus)
+	json.NewEncoder(c.Res).Encode(err)
+
+	outgoing := map[string]any{
+		"status": err.LogDependencyMetadata().AppResultHttpStatus,
+		"body":   err,
+		"header": c.Res.Header(),
+	}
+	c.log.Info(logAction.OUTBOUND("response: command-> "+c.cmd), outgoing)
+	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
+	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+	summaryLogger.FlushError(err)
+	return nil
+}

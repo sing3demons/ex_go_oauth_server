@@ -85,7 +85,7 @@ func (s *KeyService) GetJWKS(ctx context.Context) (crypto.JWKS, error) {
 		return crypto.JWKS{}, err
 	}
 
-	// FindAll returns active keys + gracefully expired ones 
+	// FindAll returns active keys + gracefully expired ones
 	records, err := s.keyRepo.FindAll(ctx)
 	if err != nil {
 		return crypto.JWKS{}, err
