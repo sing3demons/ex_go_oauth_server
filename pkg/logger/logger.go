@@ -42,7 +42,9 @@ func (c *CustomLogger) Info(actionData LoggerAction, data any, maskOptions ...Ma
 	bytes, _ := json.Marshal(clonedData)
 	c.logDto.Message = string(bytes)
 
-	c.baseLogger.LogInfo(c.logDto)
+	if c.baseLogger != nil {
+		c.baseLogger.LogInfo(c.logDto)
+	}
 
 	if c.logDto.SubAction != "" {
 		c.logDto.SubAction = ""
@@ -63,7 +65,9 @@ func (c *CustomLogger) Debug(actionData LoggerAction, data any, maskOptions ...M
 	bytes, _ := json.Marshal(clonedData)
 	c.logDto.Message = string(bytes)
 
-	c.baseLogger.LogDebug(c.logDto)
+	if c.baseLogger != nil {
+		c.baseLogger.LogDebug(c.logDto)
+	}
 
 	if c.logDto.SubAction != "" {
 		c.logDto.SubAction = ""
@@ -84,7 +88,9 @@ func (c *CustomLogger) Error(actionData LoggerAction, data any, stack string, ma
 	bytes, _ := json.Marshal(clonedData)
 	c.logDto.Message = string(bytes)
 
-	c.baseLogger.LogError(c.logDto, stack)
+	if c.baseLogger != nil {
+		c.baseLogger.LogError(c.logDto, stack)
+	}
 
 	if c.logDto.SubAction != "" {
 		c.logDto.SubAction = ""

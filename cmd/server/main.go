@@ -11,6 +11,7 @@ import (
 	"github.com/sing3demons/tr_02_oauth/internal/config"
 	"github.com/sing3demons/tr_02_oauth/internal/core/services"
 	"github.com/sing3demons/tr_02_oauth/internal/handlers"
+	"github.com/sing3demons/tr_02_oauth/pkg/middleware"
 )
 
 func main() {
@@ -90,7 +91,11 @@ func main() {
 	})
 
 	log.Printf("Starting OIDC Server on port %s", cfg.Port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), mux); err != nil {
+	
+	// ใช้ LoggerMiddleware หุ้ม Router ทั้งหมดก่อน Listen
+	loggedMux := middleware.LoggerMiddleware(mux)
+	
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), loggedMux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

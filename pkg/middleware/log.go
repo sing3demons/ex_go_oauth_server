@@ -23,19 +23,20 @@ type ResponseWriterWrapper struct {
 	statusCode int
 }
 
+// Setup Singleton-like Slog engine once
+var slogHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		// Slog injects its own "msg", we remove it since our LogDto handles Message
+		if a.Key == slog.MessageKey {
+			return slog.Attr{}
+		}
+		return a
+	},
+})
+var slogAdapter = logger.NewSlogAdapter(slog.New(slogHandler))
+var maskingSvc = &logger.DefaultMaskingService{}
+
 func LoggerMiddleware(next http.Handler) http.Handler {
-	// Setup Singleton-like Slog engine once
-	slogHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Slog injects its own "msg", we remove it since our LogDto handles Message
-			if a.Key == slog.MessageKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	})
-	slogAdapter := logger.NewSlogAdapter(slog.New(slogHandler))
-	maskingSvc := &logger.DefaultMaskingService{}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		beginTime := time.Now()
