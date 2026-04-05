@@ -36,7 +36,6 @@ var slogAdapter = logger.NewSlogAdapter(slog.New(slogHandler))
 var maskingSvc = &logger.DefaultMaskingService{}
 
 func LoggerMiddleware(next http.Handler) http.Handler {
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		beginTime := time.Now()
 
@@ -66,6 +65,7 @@ func LoggerMiddleware(next http.Handler) http.Handler {
 			TransactionId:    transactionID,
 			RecordName:       r.URL.Path, // e.g. /api/users
 			Channel:          "web",
+			Agent:            r.Header.Get("User-Agent"),
 		}
 
 		// สร้าง Detail Logger สำหรับ Request นี้
