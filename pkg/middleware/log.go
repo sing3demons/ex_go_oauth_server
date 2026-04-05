@@ -2,12 +2,15 @@ package middleware
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/sing3demons/tr_02_oauth/pkg/logger"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type contextKey string
@@ -22,18 +25,57 @@ type ResponseWriterWrapper struct {
 	statusCode int
 }
 
-// Setup Singleton-like Slog engine once
-var slogHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-	ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-		// Slog injects its own "msg", we remove it since our LogDto handles Message
-		if a.Key == slog.MessageKey {
-			return slog.Attr{}
-		}
-		return a
-	},
-})
-var slogAdapter = logger.NewSlogAdapter(slog.New(slogHandler))
+var detailSlogAdapter *logger.SlogAdapter
+var summarySlogAdapter *logger.SlogAdapter
 var maskingSvc = &logger.DefaultMaskingService{}
+
+func init() {
+	// Create logs folder
+	os.MkdirAll("logs/detail", 0755)
+	os.MkdirAll("logs/summary", 0755)
+
+	dateStr := time.Now().Format("2006-01-02")
+
+	// 1. Setup Detail Logger with Rotation
+	detailRotateLogger := &lumberjack.Logger{
+		Filename:   fmt.Sprintf("logs/detail/detail-%s.log", dateStr),
+		MaxSize:    10, // megabytes
+		MaxBackups: 14,
+		MaxAge:     28,   // days
+		Compress:   true, // disabled by default
+	}
+	detailWriter := io.MultiWriter(os.Stdout, detailRotateLogger)
+	
+	detailHandler := slog.NewJSONHandler(detailWriter, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.MessageKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	detailSlogAdapter = logger.NewSlogAdapter(slog.New(detailHandler))
+
+	// 2. Setup Summary Logger with Rotation
+	summaryRotateLogger := &lumberjack.Logger{
+		Filename:   fmt.Sprintf("logs/summary/summary-%s.log", dateStr),
+		MaxSize:    10, // megabytes
+		MaxBackups: 14,
+		MaxAge:     28,   // days
+		Compress:   true, // disabled by default
+	}
+	summaryWriter := io.MultiWriter(os.Stdout, summaryRotateLogger)
+	
+	summaryHandler := slog.NewJSONHandler(summaryWriter, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.MessageKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	summarySlogAdapter = logger.NewSlogAdapter(slog.New(summaryHandler))
+}
 
 func LoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,11 +111,11 @@ func LoggerMiddleware(next http.Handler) http.Handler {
 		}
 
 		// สร้าง Detail Logger สำหรับ Request นี้
-		detailLogger := logger.NewCustomLogger(slogAdapter, maskingSvc, baseDto)
+		detailLogger := logger.NewCustomLogger(detailSlogAdapter, maskingSvc, baseDto)
 
 		// สร้าง Summary Logger สำหรับ Request นี้
 		util := &logger.DefaultLoggerUtil{BeginTime: beginTime}
-		summaryLogger := logger.NewSummaryLogger(slogAdapter, detailLogger, util)
+		summaryLogger := logger.NewSummaryLogger(summarySlogAdapter, detailLogger, util)
 
 		// ฝัง Loggers ไว้ใน Context
 		ctx := context.WithValue(r.Context(), DetailLoggerKey, detailLogger)
