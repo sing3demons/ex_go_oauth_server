@@ -2,11 +2,14 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/pkg/logger"
+
+	"github.com/mssola/user_agent"
 )
 
 type contextKey string
@@ -19,6 +22,46 @@ const (
 type ResponseWriterWrapper struct {
 	http.ResponseWriter
 	statusCode int
+}
+
+type ClientInfo struct {
+	Type    string
+	Browser string
+	OS      string
+	IsBot   bool
+	raw     string
+}
+
+func parseUA(uaStr string) string {
+	ua := user_agent.New(uaStr)
+
+	name, version := ua.Browser()
+
+	clientInfo := ClientInfo{
+		Type: func() string {
+			if ua.Bot() {
+				return "bot"
+			}
+			if ua.Mobile() {
+				return "mobile"
+			}
+			return "browser"
+		}(),
+		Browser: name + "_" + version,
+		OS: func() string {
+			if ua.OS() == "" {
+				return "unknown"
+			}
+			return ua.OS()
+		}(),
+		IsBot: ua.Bot(),
+		raw:   uaStr,
+	}
+	if clientInfo.IsBot {
+		return fmt.Sprintf("%s(bot)|%s|%s|%s", clientInfo.Type, clientInfo.Browser, clientInfo.OS, clientInfo.raw)
+
+	}
+	return fmt.Sprintf("%s|%s|%s|%s", clientInfo.Type, clientInfo.Browser, clientInfo.OS, clientInfo.raw)
 }
 
 func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *logger.SlogAdapter, summarySlogAdapter *logger.SlogAdapter, maskingSvc logger.MaskingService) http.Handler {
@@ -49,8 +92,8 @@ func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *
 			ComponentVersion: cfg.Version,
 			SessionId:        sessionID,
 			TransactionId:    transactionID,
-			Channel:          "web",
-			Agent:            r.Header.Get("User-Agent"),
+			Channel:          "none",
+			Agent:            parseUA(r.UserAgent()),
 		}
 
 		// สร้าง Detail Logger สำหรับ Request นี้
