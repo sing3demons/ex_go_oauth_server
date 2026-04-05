@@ -12,7 +12,8 @@ app:
 log:
   detail:
     level: "debug"
-    enable-file-logging: false
+    enable-file-logging: true
+    console: true
     log-file-properties:
       dirname: "logs/detail"
       filename: "detail-%DATE%"
@@ -25,7 +26,8 @@ log:
       compress: true
   summary:
     level: "info"
-    enable-file-logging: false
+    enable-file-logging: true
+    console: true
     log-file-properties:
       dirname: "logs/summary"
       filename: "summary-%DATE%"

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/pkg/errors"
 	"github.com/sing3demons/oauth_server/pkg/logAction"
 	"github.com/sing3demons/oauth_server/pkg/logger"
@@ -43,11 +44,15 @@ type Ctx struct {
 	Res http.ResponseWriter
 	log *logger.CustomLogger
 	cmd string
+	cfg *config.Config
 }
 
 func NewCtx(r *http.Request, w http.ResponseWriter) *Ctx {
 	_log := mlog.L(r.Context())
 	return &Ctx{Req: r, Res: w, log: _log}
+}
+func newMuxContext(r *http.Request, w http.ResponseWriter, cfg *config.Config) *Ctx {
+	return &Ctx{Req: r, Res: w, log: mlog.L(r.Context()), cfg: cfg}
 }
 func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.CustomLogger {
 	c.cmd = cmd
@@ -72,6 +77,10 @@ func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.Custo
 	c.log.Update("recordName", cmd)
 	c.log.Info(logAction.INBOUND("Start receiving request from API : command-> "+cmd+" | method-> "+c.Req.Method+" | path-> "+c.Req.URL.Path), incoming, maskOptions...)
 	return c.log
+}
+
+func (c *Ctx) Config() *config.Config {
+	return c.cfg
 }
 
 func (c *Ctx) Bind(v any) error {

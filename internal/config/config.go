@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -168,6 +170,66 @@ func LoadConfig() *Config {
 		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
 		LoggerConfig:         yamlCfg.Log,
 	}
+}
+
+func (c *Config) Get(key string) any {
+	fieldMap := map[string]any{
+		"service_name":   c.ServiceName,
+		"version":        c.Version,
+		"component_name": c.ComponentName,
+		"port":           c.Port,
+		"mongo_uri":      c.MongoURI,
+		"mongo_db_name":  c.MongoDBName,
+		"redis_uri":      c.RedisURI,
+		"issuer":         c.Issuer,
+		"admin_username": c.AdminUsername,
+		"admin_password": c.AdminPassword,
+		"logger_config":  c.LoggerConfig,
+	}
+
+	parts := strings.SplitN(key, ".", 2)
+	val, ok := fieldMap[parts[0]]
+	if !ok {
+		return nil
+	}
+
+	if len(parts) == 1 {
+		return val
+	}
+
+	return getNestedField(val, parts[1])
+}
+
+func getNestedField(obj any, key string) any {
+	v := reflect.ValueOf(obj)
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+
+	parts := strings.SplitN(key, ".", 2)
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("yaml")
+		tag = strings.SplitN(tag, ",", 2)[0]
+
+		name := strings.ReplaceAll(tag, "-", "_")
+		if name == "" {
+			name = strings.ToLower(field.Name)
+		}
+
+		if name == parts[0] {
+			fv := v.Field(i).Interface()
+			if len(parts) == 1 {
+				return fv
+			}
+			return getNestedField(fv, parts[1])
+		}
+	}
+	return nil
 }
 
 func getEnv(key, defaultVal string) string {

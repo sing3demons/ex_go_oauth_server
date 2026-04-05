@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/services"
 	"github.com/sing3demons/oauth_server/internal/handlers"
+	"github.com/sing3demons/oauth_server/pkg/kp"
 	"github.com/sing3demons/oauth_server/pkg/middleware"
 )
 
@@ -56,10 +56,11 @@ func main() {
 
 	// HTTP Routing Setup
 	mux := http.NewServeMux()
+	app := kp.NewApplication(cfg, detailSlogAdapter, summarySlogAdapter)
 
 	discoveryHandler := handlers.NewDiscoveryHandler(cfg, keyService)
-	mux.HandleFunc("GET /.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
-	mux.HandleFunc("GET /jwks.json", discoveryHandler.JWKS)
+	app.GET("/.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
+	app.GET("/jwks.json", discoveryHandler.JWKS)
 
 	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, clientRepo, sessionCache, transactionCache)
 	mux.HandleFunc("GET /authorize", oauthHandler.Authorize)
@@ -94,9 +95,14 @@ func main() {
 	log.Printf("Starting OIDC Server on port %s", cfg.Port)
 
 	// ใช้ LoggerMiddleware หุ้ม Router ทั้งหมดก่อน Listen
-	loggedMux := middleware.LoggerMiddleware(mux, cfg, detailSlogAdapter, summarySlogAdapter, maskingSvc)
+	// loggedMux := middleware.LoggerMiddleware(mux, cfg, detailSlogAdapter, summarySlogAdapter, maskingSvc)
 
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), loggedMux); err != nil {
-		log.Fatalf("Server failed: %v", err)
-	}
+	// if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), loggedMux); err != nil {
+	// 	log.Fatalf("Server failed: %v", err)
+	// }
+
+	app.Use(func(next http.Handler) http.Handler {
+		return middleware.LoggerMiddleware(next, cfg, detailSlogAdapter, summarySlogAdapter, maskingSvc)
+	})
+	app.Start()
 }

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/sing3demons/oauth_server/internal/config"
@@ -19,8 +18,7 @@ func NewDiscoveryHandler(cfg *config.Config, ks *services.KeyService) *Discovery
 	return &DiscoveryHandler{cfg: cfg, ks: ks}
 }
 
-func (h *DiscoveryHandler) OpenIDConfiguration(w http.ResponseWriter, r *http.Request) {
-
+func (h *DiscoveryHandler) OpenIDConfiguration(ctx *kp.Ctx) {
 	discovery := map[string]interface{}{
 		"issuer":                                h.cfg.Issuer,
 		"authorization_endpoint":                h.cfg.Issuer + "/authorize",
@@ -36,12 +34,10 @@ func (h *DiscoveryHandler) OpenIDConfiguration(w http.ResponseWriter, r *http.Re
 		"claims_supported":                      []string{"sub", "iss", "aud", "exp", "iat", "name", "email"},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(discovery)
+	ctx.Json(http.StatusOK, discovery)
 }
 
-func (h *DiscoveryHandler) JWKS(w http.ResponseWriter, r *http.Request) {
-	ctx := kp.NewCtx(r, w)
+func (h *DiscoveryHandler) JWKS(ctx *kp.Ctx) {
 	ctx.Log("get_jwks")
 
 	jwks, err := h.ks.GetJWKS(ctx)
