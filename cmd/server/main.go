@@ -63,19 +63,19 @@ func main() {
 	app.GET("/jwks.json", discoveryHandler.JWKS)
 
 	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, clientRepo, sessionCache, transactionCache)
-	mux.HandleFunc("GET /authorize", oauthHandler.Authorize)
-	mux.HandleFunc("POST /login", oauthHandler.LoginSubmit)
-	mux.HandleFunc("POST /register", oauthHandler.RegisterSubmit)
-	mux.HandleFunc("GET /consent", oauthHandler.ConsentUI)
-	mux.HandleFunc("POST /consent", oauthHandler.ConsentSubmit)
-	mux.HandleFunc("POST /token", oauthHandler.Token)
-	mux.HandleFunc("GET /userinfo", oauthHandler.UserInfo)
-	mux.HandleFunc("POST /userinfo", oauthHandler.UserInfo)
+	app.GET("/authorize", oauthHandler.Authorize)
+	app.POST("/login", oauthHandler.LoginSubmit)
+	app.POST("/register", oauthHandler.RegisterSubmit)
+	app.GET("/consent", oauthHandler.ConsentUI)
+	app.POST("/consent", oauthHandler.ConsentSubmit)
+	app.POST("/token", oauthHandler.Token)
+	app.GET("/userinfo", oauthHandler.UserInfo)
+	app.POST("/userinfo", oauthHandler.UserInfo)
 
 	// Session Management & Token Management
-	mux.HandleFunc("GET /logout", oauthHandler.Logout)
-	mux.HandleFunc("POST /revoke", oauthHandler.Revoke)
-	mux.HandleFunc("POST /introspect", oauthHandler.Introspect)
+	app.GET("/logout", oauthHandler.Logout)
+	app.POST("/revoke", oauthHandler.Revoke)
+	app.POST("/introspect", oauthHandler.Introspect)
 
 	adminHandler := handlers.NewAdminHandler(userRepo, clientRepo)
 

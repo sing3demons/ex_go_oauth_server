@@ -49,7 +49,6 @@ func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *
 			ComponentVersion: cfg.Version,
 			SessionId:        sessionID,
 			TransactionId:    transactionID,
-			RecordName:       r.URL.Path, // e.g. /api/users
 			Channel:          "web",
 			Agent:            r.Header.Get("User-Agent"),
 		}

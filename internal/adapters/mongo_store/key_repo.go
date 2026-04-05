@@ -41,6 +41,7 @@ func NewKeyRepository(db *mongo.Database, gracePeriod time.Duration) *KeyReposit
 	return &KeyRepository{
 		col:         col,
 		gracePeriod: gracePeriod,
+		colName:     colName,
 	}
 }
 

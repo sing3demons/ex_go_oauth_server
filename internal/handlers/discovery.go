@@ -47,7 +47,7 @@ func (h *DiscoveryHandler) JWKS(ctx *kp.Ctx) {
 			Err:           err,
 			Message:       "Failed to get JWKS",
 			AppResultCode: "50000",
-		})
+		}, map[string]string{"error": "system_error"})
 		return
 	}
 

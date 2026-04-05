@@ -1,5 +1,7 @@
 package errors
 
+import "net/http"
+
 type SummaryParamsType struct {
 	AppResult           string
 	AppResultCode       string
@@ -44,7 +46,15 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "missing_or_invalid_parameter",
 			AppResultCode:       e.AppResultCode,
-			AppResultHttpStatus: 400,
+			AppResultHttpStatus: http.StatusBadRequest,
+			AppResultType:       "CLIENT_ERROR",
+			Severity:            "MAJOR_ISSUE",
+		}
+	case "40001":
+		return SummaryParamsType{
+			AppResult:           "missing_or_invalid_parameter",
+			AppResultCode:       e.AppResultCode,
+			AppResultHttpStatus: http.StatusBadRequest,
 			AppResultType:       "CLIENT_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}
@@ -52,7 +62,7 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "access_denied",
 			AppResultCode:       e.AppResultCode,
-			AppResultHttpStatus: 401,
+			AppResultHttpStatus: http.StatusUnauthorized,
 			AppResultType:       "CLIENT_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}
@@ -60,7 +70,7 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "invalid_credentials",
 			AppResultCode:       e.AppResultCode,
-			AppResultHttpStatus: 401,
+			AppResultHttpStatus: http.StatusUnauthorized,
 			AppResultType:       "CLIENT_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}
@@ -68,7 +78,7 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "data_not_found",
 			AppResultCode:       e.AppResultCode,
-			AppResultHttpStatus: 404,
+			AppResultHttpStatus: http.StatusNotFound,
 			AppResultType:       "CLIENT_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}
@@ -76,7 +86,7 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "data_exist",
 			AppResultCode:       e.AppResultCode,
-			AppResultHttpStatus: 403,
+			AppResultHttpStatus: http.StatusForbidden,
 			AppResultType:       "CLIENT_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}
@@ -84,7 +94,7 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "server_busy",
 			AppResultCode:       e.AppResultCode,
-			AppResultHttpStatus: 503,
+			AppResultHttpStatus: http.StatusServiceUnavailable,
 			AppResultType:       "SYSTEM_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}
@@ -92,7 +102,7 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "server_unavailable",
 			AppResultCode:       e.AppResultCode,
-			AppResultHttpStatus: 503,
+			AppResultHttpStatus: http.StatusServiceUnavailable,
 			AppResultType:       "SYSTEM_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}
@@ -100,7 +110,7 @@ func (e *Error) LogDependencyMetadata() SummaryParamsType {
 		return SummaryParamsType{
 			AppResult:           "system_error",
 			AppResultCode:       "50000",
-			AppResultHttpStatus: 500,
+			AppResultHttpStatus: http.StatusInternalServerError,
 			AppResultType:       "SYSTEM_ERROR",
 			Severity:            "MAJOR_ISSUE",
 		}

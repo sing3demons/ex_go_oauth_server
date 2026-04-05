@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
-	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +11,8 @@ import (
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
 	"github.com/sing3demons/oauth_server/internal/core/services"
+	"github.com/sing3demons/oauth_server/pkg/errors"
+	"github.com/sing3demons/oauth_server/pkg/kp"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -34,15 +34,17 @@ func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRep
 	}
 }
 
-func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
+func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
+	ctx.Log("authorize")
+
+	query := ctx.Req.URL.Query()
 	sid := query.Get("sid")
 	tid := query.Get("tid")
 	errMsg := query.Get("error")
 
 	// ดึง sid จาก Cookie ถ้าหาไม่เจอใน URL
 	if sid == "" {
-		if cookie, err := r.Cookie("oidc_session"); err == nil {
+		if cookie, err := ctx.Req.Cookie("oidc_session"); err == nil {
 			sid = cookie.Value
 		}
 	}
@@ -51,7 +53,12 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	if tid == "" {
 		responseType := query.Get("response_type")
 		if responseType != "code" {
-			http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
+			// http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
+			ctx.JsonError(&errors.Error{
+				Err:           fmt.Errorf("unsupported response_type: %s", responseType),
+				Message:       fmt.Sprintf("Unsupported response_type: %s. Expected 'code'", responseType),
+				AppResultCode: "40000",
+			}, map[string]string{"error": "unsupported_response_type"})
 			return
 		}
 
@@ -71,34 +78,38 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt:           time.Now().Add(15 * time.Minute),
 		}
 
-		if err := h.transactionCache.SetTransaction(r.Context(), tid, tx, 15*time.Minute); err != nil {
-			http.Error(w, "Server Error", http.StatusInternalServerError)
+		if err := h.transactionCache.SetTransaction(ctx, tid, tx, 15*time.Minute); err != nil {
+			// http.Error(w, "Server Error", http.StatusInternalServerError)
+			ctx.JsonError(&errors.Error{
+				Err:           err,
+				Message:       "Failed to set transaction",
+				AppResultCode: "50000",
+			}, map[string]string{"error": "system_error"})
 			return
 		}
 	} else {
 		// 2. ถ้ามี tid อยู่แล้ว เช็คว่าความจำนี้หมดอายุหรือยัง
-		_, err := h.transactionCache.GetTransaction(r.Context(), tid)
+		_, err := h.transactionCache.GetTransaction(ctx, tid)
 		if err != nil {
-			http.Error(w, "Session or Transaction expired. Please return to your app and try again.", http.StatusBadRequest)
+			ctx.JsonError(&errors.Error{
+				Err:           err,
+				Message:       "Session or Transaction expired. Please return to your app and try again.",
+				AppResultCode: "40000",
+			}, map[string]string{"error": "transaction_expired"})
 			return
 		}
 	}
 
 	// 2.5 ตรวจสอบว่ามี sid อยู่ในระบบ (Log in ค้างไว้) หรือไม่
-	session, _ := h.sessionCache.GetSession(r.Context(), sid)
+	session, _ := h.sessionCache.GetSession(ctx, sid)
 	if session != nil {
 		// ถ้าเคย Login แล้ว พาไปหน้า Consent ทันที
-		http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		// http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 		return
 	}
 
 	// 3. Render Unified Auth Page
-	tmpl, err := template.ParseFiles("templates/auth.html")
-	if err != nil {
-		http.Error(w, "Failed to load template", http.StatusInternalServerError)
-		return
-	}
-
 	data := struct {
 		SID   string
 		TID   string
@@ -109,31 +120,39 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		Error: errMsg,
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	tmpl.Execute(w, data)
+	ctx.RenderTemplate("templates/auth.html", data)
 }
 
-func (h *OAuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
-	sid := r.URL.Query().Get("sid")
-	tid := r.URL.Query().Get("tid")
+func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
+	ctx.Log("login")
+
+	sid := ctx.Req.URL.Query().Get("sid")
+	tid := ctx.Req.URL.Query().Get("tid")
 
 	if sid == "" || tid == "" {
-		http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
+		// http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("missing session or transaction ID"),
+			Message:       "Missing session or transaction ID",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "missing_session_or_transaction_id"})
 		return
 	}
 
-	username := r.FormValue("username")
-	password := r.FormValue("password")
+	username := ctx.Req.FormValue("username")
+	password := ctx.Req.FormValue("password")
 
-	user, err := h.userRepo.FindByUsername(r.Context(), username)
+	user, err := h.userRepo.FindByUsername(ctx, username)
 	if err != nil || user == nil {
-		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
+		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
 		return
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 	if err != nil {
-		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
+		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
 		return
 	}
 
@@ -141,10 +160,10 @@ func (h *OAuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		UserID:     user.ID,
 		LoggedInAt: time.Now(),
 	}
-	h.sessionCache.SetSession(r.Context(), sid, sessionInfo, 24*time.Hour)
+	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
 
 	// ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(ctx.Res, &http.Cookie{
 		Name:     "oidc_session",
 		Value:    sid,
 		Path:     "/",
@@ -152,31 +171,42 @@ func (h *OAuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   86400,
 	})
 
-	http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+	// http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+	ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 }
 
-func (h *OAuthHandler) RegisterSubmit(w http.ResponseWriter, r *http.Request) {
-	sid := r.URL.Query().Get("sid")
-	tid := r.URL.Query().Get("tid")
+func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
+	ctx.Log("register")
+
+	sid := ctx.Req.URL.Query().Get("sid")
+	tid := ctx.Req.URL.Query().Get("tid")
 
 	if sid == "" || tid == "" {
-		http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
+		// http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("missing session or transaction ID"),
+			Message:       "Missing session or transaction ID",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "missing_session_or_transaction_id"})
+
 		return
 	}
 
-	username := r.FormValue("username")
-	password := r.FormValue("password")
-	email := r.FormValue("email")
+	username := ctx.Req.FormValue("username")
+	password := ctx.Req.FormValue("password")
+	email := ctx.Req.FormValue("email")
 
-	existing, _ := h.userRepo.FindByUsername(r.Context(), username)
+	existing, _ := h.userRepo.FindByUsername(ctx, username)
 	if existing != nil {
-		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Username+already+taken#register", http.StatusFound)
+		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Username+already+taken#register", http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Username+already+taken#register", http.StatusFound)
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Server+Error#register", http.StatusFound)
+		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Server+Error#register", http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Server+Error#register", http.StatusFound)
 		return
 	}
 
@@ -188,8 +218,9 @@ func (h *OAuthHandler) RegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 	}
 
-	if err := h.userRepo.Create(r.Context(), user); err != nil {
-		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Database+Error#register", http.StatusFound)
+	if err := h.userRepo.Create(ctx, user); err != nil {
+		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Database+Error#register", http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Database+Error#register", http.StatusFound)
 		return
 	}
 
@@ -198,10 +229,10 @@ func (h *OAuthHandler) RegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		UserID:     user.ID,
 		LoggedInAt: time.Now(),
 	}
-	h.sessionCache.SetSession(r.Context(), sid, sessionInfo, 24*time.Hour)
+	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
 
 	// ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(ctx.Res, &http.Cookie{
 		Name:     "oidc_session",
 		Value:    sid,
 		Path:     "/",
@@ -209,31 +240,44 @@ func (h *OAuthHandler) RegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   86400,
 	})
 
-	http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+	ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 }
 
-func (h *OAuthHandler) completeAuth(w http.ResponseWriter, r *http.Request, sid, tid, userID string) {
+func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
+
 	// 2. ดึง Transaction ก้อนเดิมออกมา
-	tx, err := h.transactionCache.GetTransaction(r.Context(), tid)
+	tx, err := h.transactionCache.GetTransaction(ctx.Context(), tid)
 	if err != nil {
-		http.Error(w, "Transaction expired", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Transaction expired"),
+			Message:       "Transaction expired",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "transaction_expired"})
 		return
 	}
 
 	// 3. ปล่อย AuthCode ตามระบบ OAuth2
-	code, err := h.oauthService.GenerateAuthCode(r.Context(), tx.ClientID, userID, tx.RedirectURI, tx.Nonce, tx.Scopes, tx.CodeChallenge, tx.CodeChallengeMethod)
+	code, err := h.oauthService.GenerateAuthCode(ctx.Context(), tx.ClientID, userID, tx.RedirectURI, tx.Nonce, tx.Scopes, tx.CodeChallenge, tx.CodeChallengeMethod)
 	if err != nil {
-		http.Error(w, "Failed to authorize: "+err.Error(), http.StatusInternalServerError)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Failed to authorize: %s", err.Error()),
+			Message:       "Failed to authorize",
+			AppResultCode: "50000",
+		}, map[string]string{"error": "failed_to_authorize"})
 		return
 	}
 
 	// 4. ลบ Transaction ทิ้งเมื่อใช้งานเสร็จ
-	h.transactionCache.DeleteTransaction(r.Context(), tid)
+	h.transactionCache.DeleteTransaction(ctx.Context(), tid)
 
 	// 5. บินกลับไปเวป Client หรือส่ง JSON ถ่าไม่มี Redirect URI
 	if tx.RedirectURI == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		// w.Header().Set("Content-Type", "application/json")
+		// json.NewEncoder(w).Encode(map[string]string{
+		// 	"code":  code,
+		// 	"state": tx.State,
+		// })
+		ctx.Json(http.StatusOK, map[string]string{
 			"code":  code,
 			"state": tx.State,
 		})
@@ -242,7 +286,11 @@ func (h *OAuthHandler) completeAuth(w http.ResponseWriter, r *http.Request, sid,
 
 	redirectURL, err := url.Parse(tx.RedirectURI)
 	if err != nil {
-		http.Error(w, "Invalid redirect_uri", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Invalid redirect_uri"),
+			Message:       "Invalid redirect_uri",
+			AppResultCode: "40002",
+		}, map[string]string{"error": "invalid_redirect_uri"})
 		return
 	}
 
@@ -251,39 +299,47 @@ func (h *OAuthHandler) completeAuth(w http.ResponseWriter, r *http.Request, sid,
 	q.Set("state", tx.State)
 	redirectURL.RawQuery = q.Encode()
 
-	http.Redirect(w, r, redirectURL.String(), http.StatusFound)
+	ctx.Redirect(redirectURL.String(), http.StatusFound)
 }
 
-func (h *OAuthHandler) ConsentUI(w http.ResponseWriter, r *http.Request) {
-	sid := r.URL.Query().Get("sid")
-	tid := r.URL.Query().Get("tid")
+func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
+	ctx.Log("consent_ui")
+
+	sid := ctx.Req.URL.Query().Get("sid")
+	tid := ctx.Req.URL.Query().Get("tid")
 
 	if sid == "" || tid == "" {
-		http.Error(w, "Missing session or transaction", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Missing session or transaction"),
+			Message:       "Missing session or transaction",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "missing_session_or_transaction"})
 		return
 	}
 
-	session, err := h.sessionCache.GetSession(r.Context(), sid)
+	session, err := h.sessionCache.GetSession(ctx, sid)
 	if err != nil || session == nil {
-		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 		return
 	}
 
-	tx, err := h.transactionCache.GetTransaction(r.Context(), tid)
+	tx, err := h.transactionCache.GetTransaction(ctx, tid)
 	if err != nil || tx == nil {
-		http.Error(w, "Transaction expired", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Transaction expired"),
+			Message:       "Transaction expired",
+			AppResultCode: "40001",
+		}, map[string]string{"error": "transaction_expired"})
 		return
 	}
 
-	client, err := h.clientRepo.FindByID(r.Context(), tx.ClientID)
+	client, err := h.clientRepo.FindByID(ctx, tx.ClientID)
 	if err != nil || client == nil {
-		http.Error(w, "Invalid Client", http.StatusBadRequest)
-		return
-	}
-
-	tmpl, err := template.ParseFiles("templates/consent.html")
-	if err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Invalid Client"),
+			Message:       "Invalid Client",
+			AppResultCode: "40002",
+		}, map[string]string{"error": "invalid_client"})
 		return
 	}
 
@@ -299,37 +355,53 @@ func (h *OAuthHandler) ConsentUI(w http.ResponseWriter, r *http.Request) {
 		Scopes:     tx.Scopes,
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	tmpl.Execute(w, data)
+	ctx.RenderTemplate("templates/consent.html", data)
 }
 
-func (h *OAuthHandler) ConsentSubmit(w http.ResponseWriter, r *http.Request) {
-	sid := r.FormValue("sid")
-	tid := r.FormValue("tid")
-	action := r.FormValue("action")
+func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
+	ctx.Log("consent_submit")
+
+	sid := ctx.Req.FormValue("sid")
+	tid := ctx.Req.FormValue("tid")
+	action := ctx.Req.FormValue("action")
 
 	if sid == "" || tid == "" {
-		http.Error(w, "Missing mapping", http.StatusBadRequest)
+		// http.Error(w, "Missing mapping", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Missing session or transaction ID"),
+			Message:       "Missing session or transaction ID",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "missing_session_or_transaction_id"})
 		return
 	}
 
-	session, err := h.sessionCache.GetSession(r.Context(), sid)
+	session, err := h.sessionCache.GetSession(ctx, sid)
 	if err != nil || session == nil {
-		http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 		return
 	}
 
-	tx, err := h.transactionCache.GetTransaction(r.Context(), tid)
+	tx, err := h.transactionCache.GetTransaction(ctx, tid)
 	if err != nil || tx == nil {
-		http.Error(w, "Transaction expired", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Transaction expired"),
+			Message:       "Transaction expired",
+			AppResultCode: "40001",
+		}, map[string]string{"error": "transaction_expired"})
 		return
 	}
 
 	if action == "deny" {
-		h.transactionCache.DeleteTransaction(r.Context(), tid)
+		h.transactionCache.DeleteTransaction(ctx, tid)
 		if tx.RedirectURI == "" {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
+			// w.Header().Set("Content-Type", "application/json")
+			// json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
+			// ctx.Json(http.StatusUnauthorized, map[string]string{"error": "access_denied"})
+			ctx.JsonError(&errors.Error{
+				Err:           fmt.Errorf("access denied by user"),
+				Message:       "Access denied by user",
+				AppResultCode: "40101",
+			}, map[string]string{"error": "access_denied"})
 			return
 		}
 
@@ -340,33 +412,46 @@ func (h *OAuthHandler) ConsentSubmit(w http.ResponseWriter, r *http.Request) {
 			q.Set("state", tx.State)
 		}
 		redirectURL.RawQuery = q.Encode()
-		http.Redirect(w, r, redirectURL.String(), http.StatusFound)
+		ctx.Redirect(redirectURL.String(), http.StatusFound)
 		return
 	}
 
 	// ถ้ากด Allow อนุญาตให้ดำเนินการสร้าง Authorization Code
-	h.completeAuth(w, r, sid, tid, session.UserID)
+	h.completeAuth(ctx, sid, tid, session.UserID)
 }
 
 // Token (POST /token) เปิดรับให้ Backend เอารหัสมาแลกเป็นตัว JWT
-func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid form data", http.StatusBadRequest)
+func (h *OAuthHandler) Token(ctx *kp.Ctx) {
+
+	if err := ctx.Req.ParseForm(); err != nil {
+		ctx.Log("token")
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Invalid form data: %s", err.Error()),
+			Message:       "Invalid form data",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "invalid_form_data"})
 		return
 	}
 
-	grantType := r.FormValue("grant_type")
+	grantType := ctx.Req.FormValue("grant_type")
 	if grantType != "authorization_code" && grantType != "refresh_token" {
-		http.Error(w, "unsupported_grant_type", http.StatusBadRequest)
+		ctx.Log("token")
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Unsupported grant type: %s", grantType),
+			Message:       "Unsupported grant type",
+			AppResultCode: "40003",
+		}, map[string]string{"error": "unsupported_grant_type"})
 		return
 	}
 
-	code := r.FormValue("code")
-	clientID := r.FormValue("client_id")
-	clientSecret := r.FormValue("client_secret")
+	ctx.Log("token_" + grantType)
+
+	code := ctx.Req.FormValue("code")
+	clientID := ctx.Req.FormValue("client_id")
+	clientSecret := ctx.Req.FormValue("client_secret")
 
 	// Postman บางทีส่ง client_id มาใน Body แต่ส่ง Secret ไปใน Basic Auth
-	basicID, basicSecret, ok := r.BasicAuth()
+	basicID, basicSecret, ok := ctx.Req.BasicAuth()
 	if ok {
 		if clientID == "" {
 			clientID = basicID
@@ -381,64 +466,84 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 
 	switch grantType {
 	case "authorization_code":
-		redirectURI := r.FormValue("redirect_uri")
-		codeVerifier := r.FormValue("code_verifier")
-		fmt.Println("Token", grantType)
-		response, err = h.oauthService.ExchangeToken(r.Context(), code, clientID, clientSecret, redirectURI, codeVerifier)
+		redirectURI := ctx.Req.FormValue("redirect_uri")
+		codeVerifier := ctx.Req.FormValue("code_verifier")
+		response, err = h.oauthService.ExchangeToken(ctx, code, clientID, clientSecret, redirectURI, codeVerifier)
 	case "refresh_token":
-		refreshToken := r.FormValue("refresh_token")
-		response, err = h.oauthService.RefreshToken(r.Context(), refreshToken, clientID, clientSecret)
+		refreshToken := ctx.Req.FormValue("refresh_token")
+		response, err = h.oauthService.RefreshToken(ctx, refreshToken, clientID, clientSecret)
 	}
 
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		// w.Header().Set("Content-Type", "application/json")
+		// w.WriteHeader(http.StatusBadRequest)
+		// json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Failed to exchange token: " + err.Error(),
+			AppResultCode: "40001",
+		}, map[string]string{"error": err.Error()})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	ctx.Json(http.StatusOK, response)
 }
 
 // UserInfo (GET /userinfo) เปิดรับให้ Web/Mobile ตรวจข้อมูลส่วนตัว
-func (h *OAuthHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
+func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
+	authHeader := ctx.Req.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Missing or invalid Bearer token", http.StatusUnauthorized)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Missing or invalid Bearer token"),
+			Message:       "Missing or invalid Bearer token",
+			AppResultCode: "40100",
+		}, map[string]string{"error": "invalid_token"})
 		return
 	}
 
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// 1. ตรวจสอบความถูกต้องของ JWT
-	claims, err := h.oauthService.ValidateAccessToken(r.Context(), tokenStr)
+	claims, err := h.oauthService.ValidateAccessToken(ctx, tokenStr)
 	if err != nil {
-		http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+		// http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Invalid token: " + err.Error(),
+			AppResultCode: "40100",
+		}, map[string]string{"error": "invalid_token"})
 		return
 	}
 
 	// 2. ควัก ID ผู้ใช้จาก 'sub'
 	sub, ok := claims["sub"].(string)
 	if !ok || sub == "" {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("Invalid token claims"),
+			Message:       "Invalid token claims",
+			AppResultCode: "40101",
+		}, map[string]string{"error": "invalid_token"})
 		return
 	}
 
 	// 3. ดึงข้อมูล User จาก DB
-	user, err := h.userRepo.FindByID(r.Context(), sub)
+	user, err := h.userRepo.FindByID(ctx, sub)
 	if err != nil || user == nil {
-		http.Error(w, "User not found", http.StatusNotFound)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("User not found"),
+			Message:       "User not found",
+			AppResultCode: "40401",
+		}, map[string]string{"error": "user_not_found"})
 		return
 	}
 
 	// 4. ประกอบร่าง JSON ตามมาตรฐาน OIDC
-	userInfo := map[string]interface{}{
+	userInfo := map[string]any{
 		"sub": user.ID,
 	}
 
 	// ตรวจสอบ Scopes ที่พ่วงมากว่าได้รับอนุญาตให้ดูอะไรบ้าง
-	if scopesRaw, ok := claims["scopes"].([]interface{}); ok {
+	if scopesRaw, ok := claims["scopes"].([]any); ok {
 		for _, sRaw := range scopesRaw {
 			if s, ok := sRaw.(string); ok {
 				if s == "profile" {
@@ -453,25 +558,25 @@ func (h *OAuthHandler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(userInfo)
+	ctx.Json(http.StatusOK, userInfo)
 }
 
 // Logout (GET /logout) เปิดรับให้ยุติ Session และลบ Cookie
-func (h *OAuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	redirectURI := r.URL.Query().Get("post_logout_redirect_uri")
+func (h *OAuthHandler) Logout(ctx *kp.Ctx) {
+	ctx.Log("logout")
+	redirectURI := ctx.Req.URL.Query().Get("post_logout_redirect_uri")
 	if redirectURI == "" {
 		redirectURI = "/authorize?error=Logged+out+successfully"
 	}
 
-	if cookie, err := r.Cookie("oidc_session"); err == nil {
+	if cookie, err := ctx.Req.Cookie("oidc_session"); err == nil {
 		sid := cookie.Value
 		if sid != "" {
-			h.sessionCache.DeleteSession(r.Context(), sid)
+			h.sessionCache.DeleteSession(ctx, sid)
 		}
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(ctx.Res, &http.Cookie{
 		Name:     "oidc_session",
 		Value:    "",
 		Path:     "/",
@@ -479,22 +584,28 @@ func (h *OAuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 	})
 
-	http.Redirect(w, r, redirectURI, http.StatusFound)
+	ctx.Redirect(redirectURI, http.StatusFound)
 }
 
 // Revoke (POST /revoke) เคลียร์ Token ตาม RFC 7009
-func (h *OAuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
+	ctx.Log("revoke")
+
+	if err := ctx.Req.ParseForm(); err != nil {
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Invalid request",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "invalid_request"})
 		return
 	}
 
-	token := r.FormValue("token")
-	clientID := r.FormValue("client_id")
-	clientSecret := r.FormValue("client_secret")
+	token := ctx.Req.FormValue("token")
+	clientID := ctx.Req.FormValue("client_id")
+	clientSecret := ctx.Req.FormValue("client_secret")
 
 	// รองรับ Basic Auth
-	basicID, basicSecret, ok := r.BasicAuth()
+	basicID, basicSecret, ok := ctx.Req.BasicAuth()
 	if ok {
 		if clientID == "" {
 			clientID = basicID
@@ -505,41 +616,57 @@ func (h *OAuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if token == "" || clientID == "" {
-		http.Error(w, "missing_token_or_client", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("missing token or client ID"),
+			Message:       "Missing token or client ID",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "missing_token_or_client"})
 		return
 	}
 
-	err := h.oauthService.RevokeToken(r.Context(), token, clientID, clientSecret)
+	err := h.oauthService.RevokeToken(ctx, token, clientID, clientSecret)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Failed to revoke token",
+			AppResultCode: "40001",
+		}, map[string]string{"error": "invalid_request"})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	// w.WriteHeader(http.StatusOK)
+	ctx.Json(http.StatusOK, map[string]string{"result": "success"})
 }
 
 // Introspect (POST /introspect) ตรวจสอบสถานะของ Token ควบคู่ตาม RFC 7662
-func (h *OAuthHandler) Introspect(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
+	ctx.Log("introspect")
+	if err := ctx.Req.ParseForm(); err != nil {
+		// http.Error(w, "Invalid request", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Invalid request",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "invalid_request"})
 		return
 	}
 
-	token := r.FormValue("token")
+	token := ctx.Req.FormValue("token")
 	if token == "" {
-		http.Error(w, "missing_token", http.StatusBadRequest)
+		// http.Error(w, "missing_token", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           fmt.Errorf("missing token"),
+			Message:       "Missing token",
+			AppResultCode: "40000",
+		}, map[string]string{"error": "missing_token"})
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
 
 	// รันผ่านระบบ Validate
-	claims, err := h.oauthService.ValidateAccessToken(r.Context(), token)
+	claims, err := h.oauthService.ValidateAccessToken(ctx, token)
 	if err != nil {
 		// RFC กำหนดไว้ว่าถ้า Token ผิด ให้ตอบแค่ active: false
-		json.NewEncoder(w).Encode(map[string]bool{"active": false})
+		ctx.Json(http.StatusOK, map[string]bool{"active": false})
 		return
 	}
 
@@ -568,5 +695,5 @@ func (h *OAuthHandler) Introspect(w http.ResponseWriter, r *http.Request) {
 		resp["client_id"] = clientID
 	}
 
-	json.NewEncoder(w).Encode(resp)
+	ctx.Json(http.StatusOK, resp)
 }

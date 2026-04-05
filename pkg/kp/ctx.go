@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"html/template"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -66,6 +67,9 @@ func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.Custo
 	} else {
 		json.Unmarshal(bodyBytes, &body)
 	}
+
+	// Restore body for subsequent reads (e.g., FormValue, Bind)
+	c.Req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	incoming := map[string]any{
 		"method":  c.Req.Method,
@@ -370,14 +374,14 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 	return nil
 }
 
-func (c *Ctx) JsonError(err *errors.Error) error {
+func (c *Ctx) JsonError(err *errors.Error, body any) error {
 	c.Res.Header().Set("Content-Type", "application/json")
 	c.Res.WriteHeader(err.LogDependencyMetadata().AppResultHttpStatus)
-	json.NewEncoder(c.Res).Encode(err)
+	json.NewEncoder(c.Res).Encode(body)
 
 	outgoing := map[string]any{
 		"status": err.LogDependencyMetadata().AppResultHttpStatus,
-		"body":   err,
+		"body":   body,
 		"header": c.Res.Header(),
 	}
 	c.log.Info(logAction.OUTBOUND("response: command-> "+c.cmd), outgoing)
@@ -385,4 +389,59 @@ func (c *Ctx) JsonError(err *errors.Error) error {
 	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
 	summaryLogger.FlushError(err)
 	return nil
+}
+
+func (c *Ctx) Redirect(urlStr string, code int) {
+	http.Redirect(c.Res, c.Req, urlStr, code)
+	c.log.Info(logAction.OUTBOUND("redirect: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)+" | location-> "+urlStr), nil)
+	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
+	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+	params := logger.SummaryParamsType{
+		AppResultHttpStatus: fmt.Sprintf("%d", code),
+		AppResultType:       "Redirect",
+		Severity:            "Normal",
+		AppResultCode:       "30200",
+		AppResult:           "Redirected",
+	}
+	summaryLogger.FlushWithParams(params)
+}
+
+func (c *Ctx) RenderTemplate(templateName string, data any) error {
+	c.log.Info(logAction.OUTBOUND("render template: command-> "+c.cmd+" | template-> "+templateName), map[string]any{
+		"body":     data,
+		"template": templateName,
+		"header":   c.Res.Header(),
+	})
+	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
+	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+
+	tmpl, err := template.ParseFiles(templateName)
+	if err != nil {
+		summaryLogger.FlushError(&errors.Error{
+			Message:       "Failed to parse template",
+			Err:           err,
+			AppResultCode: "50000",
+		})
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	res := tmpl.Execute(c.Res, data)
+	if res != nil {
+		summaryLogger.FlushError(&errors.Error{
+			Message:       "Failed to execute template",
+			Err:           res,
+			AppResultCode: "50000",
+		})
+		return fmt.Errorf("failed to execute template: %w", res)
+	} else {
+		params := logger.SummaryParamsType{
+			AppResultHttpStatus: "200",
+			AppResultType:       "Healthy",
+			Severity:            "Normal",
+			AppResultCode:       "20000",
+			AppResult:           "Success",
+		}
+		summaryLogger.FlushWithParams(params)
+	}
+	return res
 }
