@@ -94,6 +94,7 @@ func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *
 			TransactionId:    transactionID,
 			Channel:          "none",
 			Agent:            parseUA(r.UserAgent()),
+			RecordType:       "detail",
 		}
 
 		// สร้าง Detail Logger สำหรับ Request นี้
