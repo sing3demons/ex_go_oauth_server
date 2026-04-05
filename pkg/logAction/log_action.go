@@ -3,7 +3,7 @@ package logAction
 import (
 	"strings"
 
-	"github.com/sing3demons/tr_02_oauth/pkg/logger"
+	"github.com/sing3demons/oauth_server/pkg/logger"
 )
 
 const (

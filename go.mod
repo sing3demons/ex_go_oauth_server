@@ -1,4 +1,4 @@
-module github.com/sing3demons/tr_02_oauth
+module github.com/sing3demons/oauth_server
 
 go 1.25.0
 

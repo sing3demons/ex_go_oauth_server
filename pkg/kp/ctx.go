@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sing3demons/tr_02_oauth/pkg/errors"
-	"github.com/sing3demons/tr_02_oauth/pkg/logAction"
-	"github.com/sing3demons/tr_02_oauth/pkg/logger"
-	"github.com/sing3demons/tr_02_oauth/pkg/middleware"
-	"github.com/sing3demons/tr_02_oauth/pkg/mlog"
+	"github.com/sing3demons/oauth_server/pkg/errors"
+	"github.com/sing3demons/oauth_server/pkg/logAction"
+	"github.com/sing3demons/oauth_server/pkg/logger"
+	"github.com/sing3demons/oauth_server/pkg/middleware"
+	"github.com/sing3demons/oauth_server/pkg/mlog"
 )
 
 const MaxBodySize = 10 << 20 // 10 MB
@@ -339,9 +339,9 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 	}
 	c.log.Info(logAction.OUTBOUND("response: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)), outgoing, maskOptions...)
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
-	
+
 	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
-	
+
 	params := logger.SummaryParamsType{
 		AppResultHttpStatus: fmt.Sprintf("%d", code),
 	}
@@ -356,7 +356,7 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 		params.AppResultCode = "20000"
 		params.AppResult = "Success"
 	}
-	
+
 	summaryLogger.FlushWithParams(params)
 	return nil
 }

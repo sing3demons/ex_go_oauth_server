@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sing3demons/tr_02_oauth/internal/core/models"
-	"github.com/sing3demons/tr_02_oauth/internal/core/ports"
+	"github.com/sing3demons/oauth_server/internal/core/models"
+	"github.com/sing3demons/oauth_server/internal/core/ports"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -136,7 +136,7 @@ func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
 	clientName := r.FormValue("client_name")
 	redirectURIsRaw := r.FormValue("redirect_uris")
 	requirePKCE := r.FormValue("require_pkce") == "true"
-	
+
 	// รับ Checkbox ที่ชื่อเดียวกันมาเป็น slice ของ string
 	r.ParseForm() // already parsed actually, but let's be safe
 	scopes := r.Form["scopes"]
@@ -167,7 +167,7 @@ func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
 		secretBytes := make([]byte, 32)
 		rand.Read(secretBytes)
 		plainSecret = base64.URLEncoding.EncodeToString(secretBytes)
-		
+
 		hash, err := bcrypt.GenerateFromPassword([]byte(plainSecret), bcrypt.DefaultCost)
 		if err == nil {
 			secretHash = string(hash)

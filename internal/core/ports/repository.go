@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sing3demons/tr_02_oauth/internal/core/models"
+	"github.com/sing3demons/oauth_server/internal/core/models"
 )
 
 type UserRepository interface {

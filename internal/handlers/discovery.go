@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/sing3demons/tr_02_oauth/internal/config"
-	"github.com/sing3demons/tr_02_oauth/internal/core/services"
-	"github.com/sing3demons/tr_02_oauth/pkg/errors"
-	"github.com/sing3demons/tr_02_oauth/pkg/kp"
+	"github.com/sing3demons/oauth_server/internal/config"
+	"github.com/sing3demons/oauth_server/internal/core/services"
+	"github.com/sing3demons/oauth_server/pkg/errors"
+	"github.com/sing3demons/oauth_server/pkg/kp"
 )
 
 type DiscoveryHandler struct {
@@ -20,7 +20,7 @@ func NewDiscoveryHandler(cfg *config.Config, ks *services.KeyService) *Discovery
 }
 
 func (h *DiscoveryHandler) OpenIDConfiguration(w http.ResponseWriter, r *http.Request) {
-	
+
 	discovery := map[string]interface{}{
 		"issuer":                                h.cfg.Issuer,
 		"authorization_endpoint":                h.cfg.Issuer + "/authorize",
@@ -48,8 +48,8 @@ func (h *DiscoveryHandler) JWKS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// http.Error(w, "Failed to get JWKS", http.StatusInternalServerError)
 		ctx.JsonError(&errors.Error{
-			Err: err,
-			Message:  "Failed to get JWKS",
+			Err:           err,
+			Message:       "Failed to get JWKS",
 			AppResultCode: "50000",
 		})
 		return

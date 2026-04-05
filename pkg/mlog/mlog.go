@@ -3,8 +3,8 @@ package mlog
 import (
 	"context"
 
-	"github.com/sing3demons/tr_02_oauth/pkg/logger"
-	"github.com/sing3demons/tr_02_oauth/pkg/middleware"
+	"github.com/sing3demons/oauth_server/pkg/logger"
+	"github.com/sing3demons/oauth_server/pkg/middleware"
 )
 
 func L(ctx context.Context) *logger.CustomLogger {

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sing3demons/tr_02_oauth/internal/config"
-	"github.com/sing3demons/tr_02_oauth/pkg/logger"
+	"github.com/sing3demons/oauth_server/internal/config"
+	"github.com/sing3demons/oauth_server/pkg/logger"
 )
 
 type contextKey string

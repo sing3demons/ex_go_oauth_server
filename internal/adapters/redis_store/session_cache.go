@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sing3demons/tr_02_oauth/internal/core/models"
+	"github.com/sing3demons/oauth_server/internal/core/models"
 )
 
 type SessionCache struct {
@@ -28,7 +28,7 @@ func (c *SessionCache) SetSession(ctx context.Context, sessionID string, info *m
 func (c *SessionCache) GetSession(ctx context.Context, sessionID string) (*models.SessionInfo, error) {
 	val, err := c.client.Get(ctx, "session:"+sessionID).Result()
 	if err != nil {
-		return nil, err 
+		return nil, err
 	}
 
 	var info models.SessionInfo

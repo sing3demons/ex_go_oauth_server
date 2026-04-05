@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sing3demons/tr_02_oauth/internal/adapters/mongo_store"
-	"github.com/sing3demons/tr_02_oauth/internal/adapters/redis_store"
-	"github.com/sing3demons/tr_02_oauth/internal/config"
-	"github.com/sing3demons/tr_02_oauth/internal/core/services"
-	"github.com/sing3demons/tr_02_oauth/internal/handlers"
-	"github.com/sing3demons/tr_02_oauth/pkg/logger"
-	"github.com/sing3demons/tr_02_oauth/pkg/middleware"
+	"github.com/sing3demons/oauth_server/internal/adapters/mongo_store"
+	"github.com/sing3demons/oauth_server/internal/adapters/redis_store"
+	"github.com/sing3demons/oauth_server/internal/config"
+	"github.com/sing3demons/oauth_server/internal/core/services"
+	"github.com/sing3demons/oauth_server/internal/handlers"
+	"github.com/sing3demons/oauth_server/pkg/logger"
+	"github.com/sing3demons/oauth_server/pkg/middleware"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -29,12 +29,12 @@ func buildLogFilename(props config.LogFileProperties) string {
 	datePattern = strings.ReplaceAll(datePattern, "HH", "15")
 
 	dateStr := time.Now().Format(datePattern)
-	
+
 	filename := props.Filename
 	if strings.Contains(filename, "%DATE%") {
 		filename = strings.ReplaceAll(filename, "%DATE%", dateStr)
 	}
-	
+
 	return fmt.Sprintf("%s/%s%s", props.Dirname, filename, props.Extension)
 }
 
@@ -46,7 +46,7 @@ func NewLogger(cfg *config.Config) (*logger.SlogAdapter, *logger.SlogAdapter, *l
 	if cfg.LoggerConfig.Detail.EnableFileLogging {
 		os.MkdirAll(cfg.LoggerConfig.Detail.LogFileProperties.Dirname, 0755)
 		path := buildLogFilename(cfg.LoggerConfig.Detail.LogFileProperties)
-		
+
 		detailRotateLogger := &lumberjack.Logger{
 			Filename:   path,
 			MaxSize:    cfg.LoggerConfig.Detail.Rotation.MaxSize / (1024 * 1024), // converting bytes to megabytes

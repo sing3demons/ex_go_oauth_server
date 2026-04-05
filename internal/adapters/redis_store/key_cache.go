@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sing3demons/tr_02_oauth/internal/core/models"
-	"github.com/sing3demons/tr_02_oauth/pkg/logAction"
-	"github.com/sing3demons/tr_02_oauth/pkg/logger"
-	"github.com/sing3demons/tr_02_oauth/pkg/mlog"
+	"github.com/sing3demons/oauth_server/internal/core/models"
+	"github.com/sing3demons/oauth_server/pkg/logAction"
+	"github.com/sing3demons/oauth_server/pkg/logger"
+	"github.com/sing3demons/oauth_server/pkg/mlog"
 )
 
 type KeyCache struct {

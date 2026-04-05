@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sing3demons/tr_02_oauth/pkg/errors"
+	"github.com/sing3demons/oauth_server/pkg/errors"
 )
 
 // SummaryParamsType defines parameters specific to summary logs

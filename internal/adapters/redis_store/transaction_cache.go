@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sing3demons/tr_02_oauth/internal/core/models"
+	"github.com/sing3demons/oauth_server/internal/core/models"
 )
 
 type TransactionCache struct {

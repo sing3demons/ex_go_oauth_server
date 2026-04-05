@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/sing3demons/tr_02_oauth/internal/config"
-	"github.com/sing3demons/tr_02_oauth/internal/core/models"
-	"github.com/sing3demons/tr_02_oauth/internal/core/ports"
+	"github.com/sing3demons/oauth_server/internal/config"
+	"github.com/sing3demons/oauth_server/internal/core/models"
+	"github.com/sing3demons/oauth_server/internal/core/ports"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -437,7 +437,7 @@ func (s *OAuthService) RevokeToken(ctx context.Context, tokenStr string, clientI
 			return errors.New("invalid_client_secret")
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
-			return errors.New("invalid_client") 
+			return errors.New("invalid_client")
 		}
 	}
 

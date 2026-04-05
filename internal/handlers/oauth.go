@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sing3demons/tr_02_oauth/internal/core/models"
-	"github.com/sing3demons/tr_02_oauth/internal/core/ports"
-	"github.com/sing3demons/tr_02_oauth/internal/core/services"
+	"github.com/sing3demons/oauth_server/internal/core/models"
+	"github.com/sing3demons/oauth_server/internal/core/ports"
+	"github.com/sing3demons/oauth_server/internal/core/services"
 	"golang.org/x/crypto/bcrypt"
 )
 
