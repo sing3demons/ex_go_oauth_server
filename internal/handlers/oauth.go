@@ -35,28 +35,19 @@ func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRep
 }
 
 func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
+	ctx.Log("authorize")
+
 	query := ctx.Req.URL.Query()
-	sid := query.Get("sid")
-	tid := query.Get("tid")
+	sid := ctx.SessionId()
+	tid := ctx.TransactionId()
 	errMsg := query.Get("error")
 
 	// ดึง sid จาก Cookie ถ้าหาไม่เจอใน URL
-	if sid == "" {
+	if query.Get("tid") == "" {
 		if cookie, err := ctx.Req.Cookie("oidc_session"); err == nil {
 			sid = cookie.Value
 		}
 	}
-
-	if sid == "" {
-		sid = uuid.New().String()
-	}
-	if tid == "" {
-		tid = uuid.New().String()
-	}
-
-	requestLog := ctx.Log("authorize")
-	requestLog.Update("SessionId", sid)
-	requestLog.Update("TransactionId", tid)
 
 	// 1. ถ้าไม่มี tid แสดงว่าเป็นการเริ่ม OAuth Flow ใหม่
 	if query.Get("tid") == "" {
