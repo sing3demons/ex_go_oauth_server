@@ -35,20 +35,55 @@ func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRep
 	}
 }
 
-func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (any, *pkgErrors.Error) {
+type ResponseMessageError struct {
+	Message string `json:"error"`
+}
+
+func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (*ResponseMessageError, *pkgErrors.Error) {
+	responseError := &ResponseMessageError{}
 	responseType := query.Get("response_type")
 	if responseType != "code" {
 		// http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
-		return map[string]string{"error": "unsupported_response_type"}, &pkgErrors.Error{
+		responseError.Message = "unsupported_response_type"
+		return responseError, &pkgErrors.Error{
 			Err:           fmt.Errorf("unsupported response_type: %s", responseType),
 			Message:       fmt.Sprintf("Unsupported response_type: %s. Expected 'code'", responseType),
 			AppResultCode: "40000",
 		}
 	}
 
+	clientID := query.Get("client_id")
+	redirectURI := query.Get("redirect_uri")
+	// Validate client exists and redirect_uri is registered
+	client, err := h.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		responseError.Message = "invalid_client"
+		return responseError, &pkgErrors.Error{
+			Err:           fmt.Errorf("client not found: %s", clientID),
+			Message:       "Invalid client_id",
+			AppResultCode: "40000",
+		}
+	}
+
+	validURI := false
+	for _, uri := range client.RedirectURIs {
+		if uri == redirectURI {
+			validURI = true
+			break
+		}
+	}
+	if !validURI {
+		responseError.Message = "invalid_redirect_uri"
+		return responseError, &pkgErrors.Error{
+			Err:           fmt.Errorf("redirect_uri not registered: %s", redirectURI),
+			Message:       "redirect_uri is not registered for this client",
+			AppResultCode: "40000",
+		}
+	}
+
 	tx := &models.AuthTransaction{
-		ClientID:            query.Get("client_id"),
-		RedirectURI:         query.Get("redirect_uri"),
+		ClientID:            clientID,
+		RedirectURI:         redirectURI,
 		Scopes:              strings.Split(query.Get("scope"), " "),
 		State:               query.Get("state"),
 		Nonce:               query.Get("nonce"),
@@ -59,7 +94,8 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 
 	if err := h.transactionCache.SetTransaction(ctx, tid, tx, 15*time.Minute); err != nil {
 		// http.Error(w, "Server Error", http.StatusInternalServerError)
-		return map[string]string{"error": "system_error"}, &pkgErrors.Error{
+		responseError.Message = "system_error"
+		return responseError, &pkgErrors.Error{
 			Err:           err,
 			Message:       "Failed to set transaction",
 			AppResultCode: "50000",
@@ -183,6 +219,8 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		Value:    sid,
 		Path:     "/",
 		HttpOnly: true,
+		// Secure:   true,                 // ← เพิ่ม: HTTPS only
+		SameSite: http.SameSiteLaxMode, // ← เพิ่ม: ป้องกัน CSRF
 		MaxAge:   86400,
 	})
 
@@ -210,6 +248,34 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	username := ctx.Req.FormValue("username")
 	password := ctx.Req.FormValue("password")
 	email := ctx.Req.FormValue("email")
+
+	// validate input
+	if username == "" || password == "" || email == "" {
+		ctx.JsonError(&pkgErrors.Error{
+			Err:           fmt.Errorf("missing required fields"),
+			Message:       "Missing required fields",
+			AppResultCode: "40000",
+		}, ResponseMessageError{Message: "missing_or_invalid_parameters"})
+		return
+	}
+
+	if len(password) < 6 {
+		ctx.JsonError(&pkgErrors.Error{
+			Err:           fmt.Errorf("password too short"),
+			Message:       "Password must be at least 6 characters",
+			AppResultCode: "40000",
+		}, ResponseMessageError{Message: "missing_or_invalid_parameters"})
+		return
+	}
+
+	if !strings.Contains(email, "@") {
+		ctx.JsonError(&pkgErrors.Error{
+			Err:           fmt.Errorf("invalid email format"),
+			Message:       "Invalid email format",
+			AppResultCode: "40000",
+		}, ResponseMessageError{Message: "missing_or_invalid_parameters"})
+		return
+	}
 
 	existing, _ := h.userRepo.FindByUsername(ctx, username)
 	if existing != nil {
@@ -492,7 +558,7 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 			Err:           err,
 			Message:       "Failed to exchange token: " + err.Error(),
 			AppResultCode: "40001",
-		}, map[string]string{"error": err.Error()})
+		}, ResponseMessageError{Message: "invalid_request"})
 		return
 	}
 
@@ -577,6 +643,10 @@ func (h *OAuthHandler) Logout(ctx *kp.Ctx) {
 	ctx.Log("logout")
 	redirectURI := ctx.Req.URL.Query().Get("post_logout_redirect_uri")
 	if redirectURI == "" {
+		redirectURI = "/authorize?error=Logged+out+successfully"
+	}
+
+	if _, err := url.ParseRequestURI(redirectURI); err != nil {
 		redirectURI = "/authorize?error=Logged+out+successfully"
 	}
 

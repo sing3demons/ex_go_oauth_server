@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -108,12 +107,8 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 
 func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, clientSecret, redirectURI, codeVerifier string) (map[string]interface{}, error) {
 	// 1. ค้นหา Auth Code จาก Redis
-	fmt.Println("==================")
-	fmt.Printf("Requesting Exchange for Code: %s, ClientID: %s, RedirectURI: %s\n", code, clientID, redirectURI)
-
 	info, err := s.authCache.GetCode(ctx, code)
 	if err != nil || info == nil {
-		fmt.Printf("GetCode Error: %v, info is nil: %v\n", err, info == nil)
 		return nil, errors.New("invalid_grant")
 	}
 
@@ -122,15 +117,12 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 
 	// 3. ตรวจสอบความถูกต้องของคำขอ
 	if info.ClientID != clientID {
-		fmt.Printf("ClientID mismatch: expected %s, got %s\n", info.ClientID, clientID)
 		return nil, errors.New("invalid_client")
 	}
 	if info.RedirectURI != redirectURI {
-		fmt.Printf("RedirectURI mismatch: expected '%s', got '%s'\n", info.RedirectURI, redirectURI)
 		return nil, errors.New("invalid_grant")
 	}
 	if time.Now().After(info.ExpiresAt) {
-		fmt.Println("Auth code expired")
 		return nil, errors.New("invalid_grant_expired")
 	}
 
@@ -205,7 +197,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	s.rtRepo.Create(ctx, rt)
 
 	// 6. เตรียมส่งกลับ
-	response := map[string]interface{}{
+	response := map[string]any{
 		"access_token":  accessToken,
 		"refresh_token": refreshTokenStr,
 		"token_type":    "Bearer",
@@ -340,7 +332,7 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 	}
 	s.rtRepo.Create(ctx, newRt)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"access_token":  accessToken,
 		"refresh_token": newRefreshTokenStr,
 		"token_type":    "Bearer",
