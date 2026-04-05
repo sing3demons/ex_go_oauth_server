@@ -2,15 +2,11 @@ package middleware
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
+	"github.com/sing3demons/tr_02_oauth/internal/config"
 	"github.com/sing3demons/tr_02_oauth/pkg/logger"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type contextKey string
@@ -25,59 +21,7 @@ type ResponseWriterWrapper struct {
 	statusCode int
 }
 
-var detailSlogAdapter *logger.SlogAdapter
-var summarySlogAdapter *logger.SlogAdapter
-var maskingSvc = &logger.DefaultMaskingService{}
-
-func init() {
-	// Create logs folder
-	os.MkdirAll("logs/detail", 0755)
-	os.MkdirAll("logs/summary", 0755)
-
-	dateStr := time.Now().Format("2006-01-02")
-
-	// 1. Setup Detail Logger with Rotation
-	detailRotateLogger := &lumberjack.Logger{
-		Filename:   fmt.Sprintf("logs/detail/detail-%s.log", dateStr),
-		MaxSize:    10, // megabytes
-		MaxBackups: 14,
-		MaxAge:     28,   // days
-		Compress:   true, // disabled by default
-	}
-	detailWriter := io.MultiWriter(os.Stdout, detailRotateLogger)
-	
-	detailHandler := slog.NewJSONHandler(detailWriter, &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.MessageKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	})
-	detailSlogAdapter = logger.NewSlogAdapter(slog.New(detailHandler))
-
-	// 2. Setup Summary Logger with Rotation
-	summaryRotateLogger := &lumberjack.Logger{
-		Filename:   fmt.Sprintf("logs/summary/summary-%s.log", dateStr),
-		MaxSize:    10, // megabytes
-		MaxBackups: 14,
-		MaxAge:     28,   // days
-		Compress:   true, // disabled by default
-	}
-	summaryWriter := io.MultiWriter(os.Stdout, summaryRotateLogger)
-	
-	summaryHandler := slog.NewJSONHandler(summaryWriter, &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.MessageKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	})
-	summarySlogAdapter = logger.NewSlogAdapter(slog.New(summaryHandler))
-}
-
-func LoggerMiddleware(next http.Handler) http.Handler {
+func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *logger.SlogAdapter, summarySlogAdapter *logger.SlogAdapter, maskingSvc logger.MaskingService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		beginTime := time.Now()
 
@@ -100,9 +44,9 @@ func LoggerMiddleware(next http.Handler) http.Handler {
 
 		// สร้าง Base DTO (จำลองค่าพื้นฐานที่ดึงจาก Config)
 		baseDto := logger.LogDto{
-			AppName:          "MyRestAPI",
-			ComponentName:    "UserManagement",
-			ComponentVersion: "1.0.0",
+			AppName:          cfg.ServiceName,
+			ComponentName:    cfg.ComponentName,
+			ComponentVersion: cfg.Version,
 			SessionId:        sessionID,
 			TransactionId:    transactionID,
 			RecordName:       r.URL.Path, // e.g. /api/users

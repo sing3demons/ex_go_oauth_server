@@ -1,0 +1,38 @@
+app:
+  name: "OAuth"
+  component-name: 'oauth oidc'
+  description: "OAuth Service"
+  version: "1.0.0"
+
+  issuer: "http://localhost:8080"
+  key-rotation-duration: "24h"
+  key-grace-period: "1h"
+  key-max-retention-count: 5
+
+log:
+  detail:
+    level: "debug"
+    enable-file-logging: false
+    log-file-properties:
+      dirname: "logs/detail"
+      filename: "detail-%DATE%"
+      date-pattern: "YYYY-MM-DD-HH"
+      extension: ".log"
+    rotation:
+      max-size: 104857600 # 100 MB
+      max-age: 7          # days
+      max-backups: 10
+      compress: true
+  summary:
+    level: "info"
+    enable-file-logging: false
+    log-file-properties:
+      dirname: "logs/summary"
+      filename: "summary-%DATE%"
+      date-pattern: "YYYY-MM-DD-HH"
+      extension: ".log"
+    rotation:
+      max-size: 104857600 # 100 MB
+      max-age: 7          # days
+      max-backups: 10
+      compress: true
