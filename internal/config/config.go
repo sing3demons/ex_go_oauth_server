@@ -1,7 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -66,19 +68,54 @@ type RotationConfig struct {
 	Compress   bool `yaml:"compress"`
 }
 
-func LoadYamlConfig(filepath string) (*YamlConfig, error) {
-	// 1. อ่านไฟล์จากดิสก์
-	data, err := os.ReadFile(filepath)
+func LoadYamlConfig(path string) (*YamlConfig, error) {
+	absPath, err := resolveConfigPath(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve config path: %w", err)
 	}
-	// 2. แกะเนื้อหามาใส่โครงสร้าง
+
+	// 🔥 เช็ค file stat ก่อน
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat config file (%s): %w", absPath, err)
+	}
+
+	if info.IsDir() {
+		return nil, fmt.Errorf("config path (%s) is a directory, not a file", absPath)
+	}
+
+	file, err := os.Open(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open config file %s: %w", absPath, err)
+	}
+	defer file.Close()
+
 	var cfg YamlConfig
-	err = yaml.Unmarshal(data, &cfg)
-	if err != nil {
-		return nil, err
+	if err := yaml.NewDecoder(file).Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse yaml config: %w", err)
 	}
+
 	return &cfg, nil
+}
+func resolveConfigPath(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+
+	// หา root จาก go.mod
+	dir, _ := os.Getwd()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return filepath.Join(dir, path), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return "", fmt.Errorf("cannot find project root")
 }
 
 func LoadConfig() *Config {
