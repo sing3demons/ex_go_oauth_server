@@ -16,7 +16,7 @@ type LogDto struct {
 	Action               string `json:"action,omitempty"`
 	SubAction            string `json:"subAction,omitempty"`
 	ActionDescription    string `json:"actionDescription,omitempty"`
-	Message              string `json:"message,omitempty"`
+	Message              any    `json:"message,omitempty"`
 	Timestamp            string `json:"timestamp,omitempty"`
 	Dependency           string `json:"dependency,omitempty"`
 	ResponseTime         int64  `json:"responseTime,omitempty"`

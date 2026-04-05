@@ -339,8 +339,25 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 	}
 	c.log.Info(logAction.OUTBOUND("response: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)), outgoing, maskOptions...)
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
+	
 	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
-	summaryLogger.Flush()
+	
+	params := logger.SummaryParamsType{
+		AppResultHttpStatus: fmt.Sprintf("%d", code),
+	}
+	if code >= 400 {
+		params.AppResultType = "Error"
+		params.Severity = "Critical"
+		params.AppResultCode = "50000"
+		params.AppResult = "Failed"
+	} else {
+		params.AppResultType = "Healthy"
+		params.Severity = "Normal"
+		params.AppResultCode = "20000"
+		params.AppResult = "Success"
+	}
+	
+	summaryLogger.FlushWithParams(params)
 	return nil
 }
 

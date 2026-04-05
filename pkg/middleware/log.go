@@ -83,23 +83,5 @@ func LoggerMiddleware(next http.Handler) http.Handler {
 
 		// 2. เรียกให้ Handler ทำงาน
 		next.ServeHTTP(rw, r.WithContext(ctx))
-
-		// 3. เมื่อ Handler ทำงานเสร็จ สั่ง Flush Summary Log ออกมา
-		// ดึงค่า status code จาก Wrapper ไปใส่ใน summary
-		// dto := detailLogger.GetLogDto()
-		// dto.AppResultHttpStatus = fmt.Sprintf("%d", rw.statusCode)
-
-		// if rw.statusCode >= 400 {
-		// 	dto.AppResultType = "Error"
-		// 	dto.Severity = "Critical"
-		// 	dto.AppResultCode = "50000"
-		// 	detailLogger.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
-		// 	summaryLogger.FlushError(map[string]any{"message": "API Failed"}, "stacktrace-goes-here")
-		// } else {
-		// 	dto.AppResultType = "Healthy"
-		// 	dto.Severity = "Normal"
-		// 	dto.AppResultCode = "20000"
-		// 	summaryLogger.Flush()
-		// }
 	})
 }

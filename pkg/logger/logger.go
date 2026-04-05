@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -39,8 +38,7 @@ func (c *CustomLogger) Info(actionData LoggerAction, data any, maskOptions ...Ma
 
 	clonedData := DeepCloneAndMask(data, maskOptions, c.maskingSvc)
 
-	bytes, _ := json.Marshal(clonedData)
-	c.logDto.Message = string(bytes)
+	c.logDto.Message = clonedData
 
 	if c.baseLogger != nil {
 		c.baseLogger.LogInfo(c.logDto)
@@ -62,8 +60,7 @@ func (c *CustomLogger) Debug(actionData LoggerAction, data any, maskOptions ...M
 
 	clonedData := DeepCloneAndMask(data, maskOptions, c.maskingSvc)
 
-	bytes, _ := json.Marshal(clonedData)
-	c.logDto.Message = string(bytes)
+	c.logDto.Message = clonedData
 
 	if c.baseLogger != nil {
 		c.baseLogger.LogDebug(c.logDto)
@@ -85,8 +82,7 @@ func (c *CustomLogger) Error(actionData LoggerAction, data any, stack string, ma
 
 	clonedData := DeepCloneAndMask(data, maskOptions, c.maskingSvc)
 
-	bytes, _ := json.Marshal(clonedData)
-	c.logDto.Message = string(bytes)
+	c.logDto.Message = clonedData
 
 	if c.baseLogger != nil {
 		c.baseLogger.LogError(c.logDto, stack)
