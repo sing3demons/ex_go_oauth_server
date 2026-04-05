@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/pkg/errors"
 	"github.com/sing3demons/oauth_server/pkg/logAction"
@@ -41,11 +43,13 @@ const (
 )
 
 type Ctx struct {
-	Req *http.Request
-	Res http.ResponseWriter
-	log *logger.CustomLogger
-	cmd string
-	cfg *config.Config
+	Req           *http.Request
+	Res           http.ResponseWriter
+	log           *logger.CustomLogger
+	cmd           string
+	cfg           *config.Config
+	sessionId     string
+	transactionId string
 }
 
 func NewCtx(r *http.Request, w http.ResponseWriter) *Ctx {
@@ -78,9 +82,121 @@ func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.Custo
 		"query":   c.Req.URL.Query(),
 		"body":    body,
 	}
-	c.log.Update("recordName", cmd)
+
+	c.ensureRequestMetadata(cmd, body, bodyBytes)
 	c.log.Info(logAction.INBOUND("Start receiving request from API : command-> "+cmd+" | method-> "+c.Req.Method+" | path-> "+c.Req.URL.Path), incoming, maskOptions...)
 	return c.log
+}
+
+func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any, bodyBytes []byte) {
+	if cmd != "" {
+		c.log.Update("RecordName", cmd)
+	}
+
+	if c.sessionId == "" {
+		c.sessionId = c.resolveRequestID("X-Session-ID", "sid", body, bodyBytes)
+	}
+	if c.transactionId == "" {
+		c.transactionId = c.resolveRequestID("X-Transaction-ID", "tid", body, bodyBytes)
+	}
+
+	c.log.Update("SessionId", c.sessionId)
+	c.log.Update("TransactionId", c.transactionId)
+
+	ctx := c.Req.Context()
+	if ctx.Value(SessionID) == nil {
+		ctx = context.WithValue(ctx, SessionID, c.sessionId)
+	}
+	if ctx.Value(TransactionID) == nil {
+		ctx = context.WithValue(ctx, TransactionID, c.transactionId)
+	}
+	c.Req = c.Req.WithContext(ctx)
+}
+
+func (c *Ctx) resolveRequestID(headerName, paramName string, body map[string]any, bodyBytes []byte) string {
+	if value := c.Req.Header.Get(headerName); value != "" {
+		return value
+	}
+	if value := c.Req.URL.Query().Get(paramName); value != "" {
+		return value
+	}
+	if value := c.extractBodyValue(paramName, body, bodyBytes); value != "" {
+		return value
+	}
+	return uuid.New().String()
+}
+
+func (c *Ctx) extractBodyValue(key string, body map[string]any, bodyBytes []byte) string {
+	if len(body) > 0 {
+		if value := stringifyBodyValue(body[key]); value != "" {
+			return value
+		}
+	}
+	if len(bodyBytes) == 0 {
+		return ""
+	}
+
+	contentType := c.Req.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+	}
+
+	switch mediaType {
+	case string(ContentTypeForm):
+		values, parseErr := url.ParseQuery(string(bodyBytes))
+		if parseErr == nil {
+			return values.Get(key)
+		}
+	case string(ContentTypeMultipartForm):
+		boundary := params["boundary"]
+		if boundary == "" {
+			return ""
+		}
+		reader := multipart.NewReader(bytes.NewReader(bodyBytes), boundary)
+		for {
+			part, partErr := reader.NextPart()
+			if partErr == io.EOF {
+				break
+			}
+			if partErr != nil {
+				return ""
+			}
+			if part.FormName() != key {
+				continue
+			}
+			partBytes, readErr := io.ReadAll(part)
+			if readErr != nil {
+				return ""
+			}
+			return string(partBytes)
+		}
+	}
+
+	return ""
+}
+
+func stringifyBodyValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	case fmt.Stringer:
+		return typed.String()
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, bool:
+		return fmt.Sprint(typed)
+	default:
+		return ""
+	}
+}
+
+func (c *Ctx) SessionId() string {
+	return c.sessionId
+}
+
+func (c *Ctx) TransactionId() string {
+	return c.transactionId
 }
 
 func (c *Ctx) Config() *config.Config {
@@ -341,6 +457,7 @@ func (c *Ctx) Value(key any) any {
 }
 
 func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
+	c.ensureRequestMetadata(c.cmd, nil, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
 	c.Res.WriteHeader(code)
 	json.NewEncoder(c.Res).Encode(v)
@@ -375,6 +492,7 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 }
 
 func (c *Ctx) JsonError(err *errors.Error, body any) error {
+	c.ensureRequestMetadata(c.cmd, nil, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
 	c.Res.WriteHeader(err.LogDependencyMetadata().AppResultHttpStatus)
 	json.NewEncoder(c.Res).Encode(body)
@@ -392,6 +510,7 @@ func (c *Ctx) JsonError(err *errors.Error, body any) error {
 }
 
 func (c *Ctx) Redirect(urlStr string, code int) {
+	c.ensureRequestMetadata(c.cmd, nil, nil)
 	http.Redirect(c.Res, c.Req, urlStr, code)
 	c.log.Info(logAction.OUTBOUND("redirect: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)+" | location-> "+urlStr), nil)
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
@@ -407,6 +526,7 @@ func (c *Ctx) Redirect(urlStr string, code int) {
 }
 
 func (c *Ctx) RenderTemplate(templateName string, data any) error {
+	c.ensureRequestMetadata(c.cmd, nil, nil)
 	c.log.Info(logAction.OUTBOUND("render template: command-> "+c.cmd+" | template-> "+templateName), map[string]any{
 		"body":     data,
 		"template": templateName,

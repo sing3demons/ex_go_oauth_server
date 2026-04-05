@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -38,7 +40,7 @@ func (c *CustomLogger) Info(actionData LoggerAction, data any, maskOptions ...Ma
 
 	clonedData := DeepCloneAndMask(data, maskOptions, c.maskingSvc)
 
-	c.logDto.Message = clonedData
+	c.logDto.Message = ToString(clonedData)
 
 	if c.baseLogger != nil {
 		c.baseLogger.LogInfo(c.logDto)
@@ -60,7 +62,7 @@ func (c *CustomLogger) Debug(actionData LoggerAction, data any, maskOptions ...M
 
 	clonedData := DeepCloneAndMask(data, maskOptions, c.maskingSvc)
 
-	c.logDto.Message = clonedData
+	c.logDto.Message = ToString(clonedData)
 
 	if c.baseLogger != nil {
 		c.baseLogger.LogDebug(c.logDto)
@@ -82,7 +84,7 @@ func (c *CustomLogger) Error(actionData LoggerAction, data any, stack string, ma
 
 	clonedData := DeepCloneAndMask(data, maskOptions, c.maskingSvc)
 
-	c.logDto.Message = clonedData
+	c.logDto.Message = ToString(clonedData)
 
 	if c.baseLogger != nil {
 		c.baseLogger.LogError(c.logDto, stack)
@@ -110,6 +112,32 @@ func (c *CustomLogger) GetLogDto() LogDto {
 
 func (c *CustomLogger) Update(key string, value any) {
 	// A reflective mapper could be implemented. Handled per explicitly needed fields in practice.
+	switch strings.ToLower(key) {
+	case "sessionid":
+		if v, ok := value.(string); ok {
+			c.logDto.SessionId = v
+		}
+	case "transactionid":
+		if v, ok := value.(string); ok {
+			c.logDto.TransactionId = v
+		}
+	case "componentversion":
+		if v, ok := value.(string); ok {
+			c.logDto.ComponentVersion = v
+		}
+	case "channel":
+		if v, ok := value.(string); ok {
+			c.logDto.Channel = v
+		}
+	case "agent":
+		if v, ok := value.(string); ok {
+			c.logDto.Agent = v
+		}
+	case "recordname":
+		if v, ok := value.(string); ok {
+			c.logDto.RecordName = v
+		}
+	}
 }
 
 func (c *CustomLogger) clearDependencyMetadata() {
@@ -123,4 +151,21 @@ func (c *CustomLogger) clearDependencyMetadata() {
 
 func (c *CustomLogger) clearAdditionalInfo() {
 	c.logDto.AdditionalInfo = nil
+}
+
+func ToString(v any) (result string) {
+	if v == nil {
+		return "null"
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			result = "null"
+		}
+	}()
+
+	return fmt.Sprintf("%v", v)
 }

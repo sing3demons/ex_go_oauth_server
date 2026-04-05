@@ -35,8 +35,6 @@ func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRep
 }
 
 func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
-	ctx.Log("authorize")
-
 	query := ctx.Req.URL.Query()
 	sid := query.Get("sid")
 	tid := query.Get("tid")
@@ -49,8 +47,19 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 		}
 	}
 
-	// 1. ถ้าไม่มี tid แสดงว่าเป็นการเริ่ม OAuth Flow ใหม่
+	if sid == "" {
+		sid = uuid.New().String()
+	}
 	if tid == "" {
+		tid = uuid.New().String()
+	}
+
+	requestLog := ctx.Log("authorize")
+	requestLog.Update("SessionId", sid)
+	requestLog.Update("TransactionId", tid)
+
+	// 1. ถ้าไม่มี tid แสดงว่าเป็นการเริ่ม OAuth Flow ใหม่
+	if query.Get("tid") == "" {
 		responseType := query.Get("response_type")
 		if responseType != "code" {
 			// http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
@@ -61,11 +70,6 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 			}, map[string]string{"error": "unsupported_response_type"})
 			return
 		}
-
-		if sid == "" {
-			sid = uuid.New().String()
-		}
-		tid = uuid.New().String()
 
 		tx := &models.AuthTransaction{
 			ClientID:            query.Get("client_id"),
