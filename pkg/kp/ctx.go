@@ -63,18 +63,9 @@ func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.Custo
 	c.cmd = cmd
 	// copy body
 	body := make(map[string]any)
-	const MaxBodySize = 10 << 20 // 10 MB
-	limitedReader := io.LimitReader(c.Req.Body, MaxBodySize)
-	bodyBytes, err := io.ReadAll(limitedReader)
-	if err != nil {
-		body = map[string]any{}
-	} else {
-		json.Unmarshal(bodyBytes, &body)
-	}
+	c.Bind(&body)
 
 	// Restore body for subsequent reads (e.g., FormValue, Bind)
-	c.Req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
 	incoming := map[string]any{
 		"method":  c.Req.Method,
 		"url":     c.Req.URL.String(),
@@ -83,12 +74,12 @@ func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.Custo
 		"body":    body,
 	}
 
-	c.ensureRequestMetadata(cmd, body, bodyBytes)
+	c.ensureRequestMetadata(cmd, body)
 	c.log.Info(logAction.INBOUND("Start receiving request from API : command-> "+cmd+" | method-> "+c.Req.Method+" | path-> "+c.Req.URL.Path), incoming, maskOptions...)
 	return c.log
 }
 
-func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any, bodyBytes []byte) {
+func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any) {
 	if cmd != "" {
 		c.log.Update("RecordName", cmd)
 	}
@@ -100,10 +91,10 @@ func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any, bodyBytes [
 	}
 
 	if c.sessionId == "" {
-		c.sessionId = c.resolveRequestID("X-Session-ID", "sid", body, bodyBytes)
+		c.sessionId = c.resolveRequestID("X-Session-ID", "sid", body)
 	}
 	if c.transactionId == "" {
-		c.transactionId = c.resolveRequestID("X-Transaction-ID", "tid", body, bodyBytes)
+		c.transactionId = c.resolveRequestID("X-Transaction-ID", "tid", body)
 	}
 
 	c.log.Update("SessionId", c.sessionId)
@@ -119,14 +110,14 @@ func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any, bodyBytes [
 	c.Req = c.Req.WithContext(ctx)
 }
 
-func (c *Ctx) resolveRequestID(headerName, paramName string, body map[string]any, bodyBytes []byte) string {
+func (c *Ctx) resolveRequestID(headerName, paramName string, body map[string]any) string {
 	if value := c.Req.Header.Get(headerName); value != "" {
 		return value
 	}
 	if value := c.Req.URL.Query().Get(paramName); value != "" {
 		return value
 	}
-	if value := c.extractBodyValue(paramName, body, bodyBytes); value != "" {
+	if value := stringifyBodyValue(body[paramName]); value != "" {
 		return value
 	}
 	return uuid.New().String()
@@ -463,7 +454,7 @@ func (c *Ctx) Value(key any) any {
 }
 
 func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
-	c.ensureRequestMetadata(c.cmd, nil, nil)
+	c.ensureRequestMetadata(c.cmd, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
 	c.Res.WriteHeader(code)
 	json.NewEncoder(c.Res).Encode(v)
@@ -498,7 +489,7 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 }
 
 func (c *Ctx) JsonError(err *errors.Error, body any) error {
-	c.ensureRequestMetadata(c.cmd, nil, nil)
+	c.ensureRequestMetadata(c.cmd, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
 	c.Res.WriteHeader(err.LogDependencyMetadata().AppResultHttpStatus)
 	json.NewEncoder(c.Res).Encode(body)
@@ -516,13 +507,13 @@ func (c *Ctx) JsonError(err *errors.Error, body any) error {
 }
 
 func (c *Ctx) Redirect(urlStr string, code int) {
-	c.ensureRequestMetadata(c.cmd, nil, nil)
+	c.ensureRequestMetadata(c.cmd, nil)
 	http.Redirect(c.Res, c.Req, urlStr, code)
 	c.log.Info(logAction.OUTBOUND("redirect: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)+" | location-> "+urlStr), map[string]any{
 		"status":   code,
 		"location": urlStr,
-		"body": "Found. Redirecting to " + urlStr,
-		"header": c.Res.Header(),
+		"body":     "Found. Redirecting to " + urlStr,
+		"header":   c.Res.Header(),
 	})
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
 	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
@@ -537,7 +528,7 @@ func (c *Ctx) Redirect(urlStr string, code int) {
 }
 
 func (c *Ctx) RenderTemplate(templateName string, data any) error {
-	c.ensureRequestMetadata(c.cmd, nil, nil)
+	c.ensureRequestMetadata(c.cmd, nil)
 	c.log.Info(logAction.OUTBOUND("render template: command-> "+c.cmd+" | template-> "+templateName), map[string]any{
 		"body":     data,
 		"template": templateName,

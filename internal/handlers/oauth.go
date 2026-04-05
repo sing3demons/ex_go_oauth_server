@@ -14,6 +14,7 @@ import (
 	"github.com/sing3demons/oauth_server/internal/core/services"
 	pkgErrors "github.com/sing3demons/oauth_server/pkg/errors"
 	"github.com/sing3demons/oauth_server/pkg/kp"
+	"github.com/sing3demons/oauth_server/pkg/logger"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -175,7 +176,22 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 }
 
 func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
-	ctx.Log("login")
+	ctx.Log("login", logger.MaskingOption{
+		MaskingField: "body.password",
+		MaskingType:  logger.MaskCustom,
+		Callback: func(s string) string {
+			return "**********"
+		},
+	}, logger.MaskingOption{
+		MaskingField: "body.username",
+		MaskingType:  logger.MaskCustom,
+		Callback: func(s string) string {
+			if len(s) <= 3 {
+				return s
+			}
+			return s[:3] + strings.Repeat("*", len(s)-4) + s[len(s)-1:]
+		},
+	})
 
 	sid := ctx.Req.URL.Query().Get("sid")
 	tid := ctx.Req.URL.Query().Get("tid")
