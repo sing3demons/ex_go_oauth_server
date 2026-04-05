@@ -160,7 +160,7 @@ func getString(v any) string {
 // clearDetailedFields strips operational metadata just like TS clearNonSummaryLogParam
 func (s *SummaryLogger) clearDetailedFields(dto *LogDto) {
 	dto.Action = ""
-	dto.Message = ""
+	dto.Message = nil
 	dto.Timestamp = ""
 	dto.Dependency = ""
 	dto.ResponseTime = 0
