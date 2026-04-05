@@ -1,6 +1,11 @@
 package errors
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+)
+
+var ErrNotFound = errors.New("not_found")
 
 type SummaryParamsType struct {
 	AppResult           string

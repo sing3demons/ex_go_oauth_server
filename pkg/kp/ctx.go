@@ -93,6 +93,12 @@ func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any, bodyBytes [
 		c.log.Update("RecordName", cmd)
 	}
 
+	if cmd == "authorize" {
+		if cookie, err := c.Req.Cookie("oidc_session"); err == nil && cookie.Value != "" {
+			c.sessionId = cookie.Value
+		}
+	}
+
 	if c.sessionId == "" {
 		c.sessionId = c.resolveRequestID("X-Session-ID", "sid", body, bodyBytes)
 	}
