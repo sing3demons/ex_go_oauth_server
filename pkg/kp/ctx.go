@@ -518,7 +518,12 @@ func (c *Ctx) JsonError(err *errors.Error, body any) error {
 func (c *Ctx) Redirect(urlStr string, code int) {
 	c.ensureRequestMetadata(c.cmd, nil, nil)
 	http.Redirect(c.Res, c.Req, urlStr, code)
-	c.log.Info(logAction.OUTBOUND("redirect: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)+" | location-> "+urlStr), nil)
+	c.log.Info(logAction.OUTBOUND("redirect: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)+" | location-> "+urlStr), map[string]any{
+		"status":   code,
+		"location": urlStr,
+		"body": "Found. Redirecting to " + urlStr,
+		"header": c.Res.Header(),
+	})
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
 	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
 	params := logger.SummaryParamsType{

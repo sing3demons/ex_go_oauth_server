@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -166,6 +167,10 @@ func ToString(v any) (result string) {
 			result = "null"
 		}
 	}()
+
+	if b, err := json.Marshal(v); err == nil {
+		return string(b)
+	}
 
 	return fmt.Sprintf("%v", v)
 }

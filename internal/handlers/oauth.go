@@ -501,6 +501,7 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 
 // UserInfo (GET /userinfo) เปิดรับให้ Web/Mobile ตรวจข้อมูลส่วนตัว
 func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
+	ctx.Log("userinfo")
 	authHeader := ctx.Req.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		ctx.JsonError(&pkgErrors.Error{
