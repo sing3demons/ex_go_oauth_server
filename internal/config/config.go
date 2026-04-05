@@ -164,8 +164,8 @@ func LoadConfig() *Config {
 		KeyRotationDuration:  yamlCfg.App.KeyRotationDuration,
 		KeyGracePeriod:       yamlCfg.App.KeyGracePeriod,
 		KeyMaxRetentionCount: yamlCfg.App.KeyMaxRetentionCount,
-		AdminUsername:        getEnv("ADMIN_USERNAME", "admin"),
-		AdminPassword:        getEnv("ADMIN_PASSWORD", "adminsecret"),
+		AdminUsername:        getEnv("ADMIN_USERNAME", ""),
+		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
 		LoggerConfig:         yamlCfg.Log,
 	}
 }
