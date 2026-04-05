@@ -67,28 +67,16 @@ type RotationConfig struct {
 }
 
 func LoadYamlConfig(filepath string) (*YamlConfig, error) {
-	// ตั้งค่า Defaults ให้กับระบบ
-	cfg := YamlConfig{
-		App: AppConfig{
-			Name:                 "OAuth",
-			Version:              "1.0.0",
-			Issuer:               "http://localhost:8080",
-			KeyRotationDuration:  30 * 24 * time.Hour,
-			KeyGracePeriod:       14 * 24 * time.Hour,
-			KeyMaxRetentionCount: 5,
-		},
-	}
-
+	// 1. อ่านไฟล์จากดิสก์
 	data, err := os.ReadFile(filepath)
 	if err != nil {
-		// ถ้าไฟล์พังหรือไม่มี จะพ่น error แต่มันก็จะยังใช้ cfg ค่า default ติดตัวไปด้วย
-		return &cfg, err
+		return nil, err
 	}
-
-	// แกะเนื้อหามาทับทับค่า Default (ถ้าไม่ได้ระบุในไฟล์ จะคงค่า Default ไว้)
+	// 2. แกะเนื้อหามาใส่โครงสร้าง
+	var cfg YamlConfig
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {
-		return &cfg, err
+		return nil, err
 	}
 	return &cfg, nil
 }
@@ -139,8 +127,8 @@ func LoadConfig() *Config {
 		KeyRotationDuration:  yamlCfg.App.KeyRotationDuration,
 		KeyGracePeriod:       yamlCfg.App.KeyGracePeriod,
 		KeyMaxRetentionCount: yamlCfg.App.KeyMaxRetentionCount,
-		AdminUsername:        getEnv("ADMIN_USERNAME", ""),
-		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
+		AdminUsername:        getEnv("ADMIN_USERNAME", "admin"),
+		AdminPassword:        getEnv("ADMIN_PASSWORD", "adminsecret"),
 		LoggerConfig:         yamlCfg.Log,
 	}
 }
