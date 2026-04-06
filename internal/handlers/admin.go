@@ -149,12 +149,14 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 		GrantTypes          []string
 		SigningAlgs         []string
 		SubjectTypes        []string
+		AuthMethods         []string
 	}{
 		Clients:         clients,
 		ScopesSupported: h.cfg.GetArray("oidc.scopes_supported"),
 		GrantTypes:      h.cfg.GetArray("oidc.grant_types_supported"),
 		SigningAlgs:     h.cfg.GetArray("oidc.id_token_signing_alg_values_supported"),
 		SubjectTypes:    h.cfg.GetArray("oidc.subject_types_supported"),
+		AuthMethods:     h.cfg.GetArray("oidc.token_endpoint_auth_methods_supported"),
 	}
 
 	ctx.RenderTemplate("templates/admin_dashboard.html", data)
@@ -267,6 +269,25 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 		subjectType = "public" // default
 	}
 
+	// Validate and default token_endpoint_auth_method
+	authMethod := ctx.Req.FormValue("token_endpoint_auth_method")
+	supportedAuthMethods := h.cfg.GetArray("oidc.token_endpoint_auth_methods_supported")
+	authMethodValid := false
+	for _, m := range supportedAuthMethods {
+		if m == authMethod {
+			authMethodValid = true
+			break
+		}
+	}
+	if !authMethodValid {
+		// Sensible default based on client type
+		if clientType == "confidential" {
+			authMethod = "client_secret_basic"
+		} else {
+			authMethod = "none"
+		}
+	}
+
 	clientID := uuid.New().String()
 	var plainSecret string
 	var secretHash string
@@ -290,10 +311,11 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 		ClientName:       clientName,
 		RedirectURIs:     redirectURIs,
 		GrantTypes:       grantTypes,
-		AllowedScopes:            scopes,
-		RequirePKCE:              requirePKCE,
+		AllowedScopes:           scopes,
+		RequirePKCE:             requirePKCE,
 		IDTokenSignedResponseAlg: idTokenAlg,
-		SubjectType:              subjectType,
+		SubjectType:             subjectType,
+		TokenEndpointAuthMethod: authMethod,
 	}
 
 	if err := h.clientRepo.Create(ctx.Req.Context(), client); err != nil {

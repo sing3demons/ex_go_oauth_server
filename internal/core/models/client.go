@@ -11,4 +11,5 @@ type Client struct {
 	RequirePKCE              bool     `bson:"require_pkce" json:"require_pkce"`
 	IDTokenSignedResponseAlg string   `bson:"id_token_signed_response_alg" json:"id_token_signed_response_alg"`
 	SubjectType              string   `bson:"subject_type" json:"subject_type"` // "public" or "pairwise"
+	TokenEndpointAuthMethod  string   `bson:"token_endpoint_auth_method" json:"token_endpoint_auth_method"` // "client_secret_basic", "client_secret_post", "none"
 }

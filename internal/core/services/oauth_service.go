@@ -124,7 +124,7 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 	return code, nil
 }
 
-func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, clientSecret, redirectURI, codeVerifier string) (map[string]interface{}, error) {
+func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, clientSecret, redirectURI, codeVerifier, usedAuthMethod string) (map[string]interface{}, error) {
 	// 1. ค้นหา Auth Code จาก Redis
 	info, err := s.authCache.GetCode(ctx, code)
 	if err != nil || info == nil {
@@ -150,13 +150,8 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	if err != nil || client == nil {
 		return nil, errors.New("invalid_client")
 	}
-	if client.ClientType == "confidential" {
-		if clientSecret == "" {
-			return nil, errors.New("invalid_client_secret: confidential clients must provide a secret")
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
-			return nil, errors.New("invalid_client_secret: secret mismatch")
-		}
+	if err := s.validateClientAuth(client, usedAuthMethod, clientSecret); err != nil {
+		return nil, err
 	}
 
 	// 3.5 PKCE Verification
@@ -290,20 +285,15 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 }
 
 // RefreshToken exchanges a valid refresh token for a new set of access/id tokens and optionally a new refresh token.
-func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string, clientID string, clientSecret string) (map[string]interface{}, error) {
+func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string, clientID string, clientSecret string, usedAuthMethod string) (map[string]interface{}, error) {
 	// 1. Validate Client
 	client, err := s.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
 		return nil, errors.New("invalid_client")
 	}
 
-	if client.ClientType == "confidential" {
-		if clientSecret == "" {
-			return nil, errors.New("invalid_client_secret: confidential clients must provide a secret")
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
-			return nil, errors.New("invalid_client_secret")
-		}
+	if err := s.validateClientAuth(client, usedAuthMethod, clientSecret); err != nil {
+		return nil, err
 	}
 
 	// 2. Lookup Refresh Token
@@ -416,7 +406,7 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 
 // ClientCredentials handles the client_credentials grant type (M2M flows).
 // ไม่ต้องการ User — Client ยืนยันตัวเองด้วย client_id + client_secret
-func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSecret string, scopes []string) (map[string]interface{}, error) {
+func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSecret string, scopes []string, usedAuthMethod string) (map[string]interface{}, error) {
 	// 1. ค้นหาและยืนยัน Client
 	client, err := s.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
@@ -428,12 +418,9 @@ func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSe
 		return nil, errors.New("unauthorized_client: client_credentials requires a confidential client")
 	}
 
-	// 3. ตรวจสอบ Client Secret
-	if clientSecret == "" {
-		return nil, errors.New("invalid_client: client_secret is required")
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
-		return nil, errors.New("invalid_client: secret mismatch")
+	// 3. Validate auth method
+	if err := s.validateClientAuth(client, usedAuthMethod, clientSecret); err != nil {
+		return nil, err
 	}
 
 	// 4. ตรวจสอบว่า Client รองรับ grant_type นี้
@@ -554,19 +541,14 @@ func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString stri
 }
 
 // RevokeToken invalidates a refresh token
-func (s *OAuthService) RevokeToken(ctx context.Context, tokenStr string, clientID string, clientSecret string) error {
+func (s *OAuthService) RevokeToken(ctx context.Context, tokenStr string, clientID string, clientSecret string, usedAuthMethod string) error {
 	client, err := s.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
 		return errors.New("invalid_client")
 	}
 
-	if client.ClientType == "confidential" {
-		if clientSecret == "" {
-			return errors.New("invalid_client_secret")
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
-			return errors.New("invalid_client")
-		}
+	if err := s.validateClientAuth(client, usedAuthMethod, clientSecret); err != nil {
+		return err
 	}
 
 	// ลบออกไป (ถ้าไม่มีในระบบ ก็ให้ถือว่าสำเร็จ 200 OK ตาม RFC)
@@ -577,17 +559,15 @@ func (s *OAuthService) RevokeToken(ctx context.Context, tokenStr string, clientI
 // TokenExchange handles the RFC 8693 token exchange.
 func (s *OAuthService) TokenExchange(
 	ctx context.Context, subjectToken, subjectTokenType, clientID, clientSecret string,
-	requestedScopes []string, audience string,
+	requestedScopes []string, audience string, usedAuthMethod string,
 ) (map[string]interface{}, error) {
 	// 1. Validate Client
 	client, err := s.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
 		return nil, errors.New("invalid_client")
 	}
-	if client.ClientType == "confidential" {
-		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
-			return nil, errors.New("invalid_client")
-		}
+	if err := s.validateClientAuth(client, usedAuthMethod, clientSecret); err != nil {
+		return nil, err
 	}
 
 	hasGrant := false
@@ -782,4 +762,47 @@ func (s *OAuthService) deriveSub(client *models.Client, userID string) string {
 	mac := hmac.New(sha256.New, []byte(s.cfg.PairwiseSalt))
 	mac.Write([]byte(client.ClientID + "|" + userID))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// validateClientAuth enforces the registered token_endpoint_auth_method for a client.
+// usedMethod: how credentials were actually sent ("client_secret_basic", "client_secret_post", "none")
+func (s *OAuthService) validateClientAuth(client *models.Client, usedMethod, secret string) error {
+	expected := client.TokenEndpointAuthMethod
+	if expected == "" {
+		// Legacy fallback: infer from client type
+		if client.ClientType == "confidential" {
+			expected = usedMethod // accept whatever method was used
+			if expected == "none" || expected == "" {
+				expected = "client_secret_post" // require some secret
+			}
+		} else {
+			expected = "none"
+		}
+	}
+
+	switch expected {
+	case "none":
+		// Public client — no secret required or accepted
+		if secret != "" {
+			return errors.New("invalid_client: this client does not accept credentials")
+		}
+		return nil
+	case "client_secret_basic", "client_secret_post":
+		if client.ClientType != "confidential" {
+			return errors.New("invalid_client: public clients cannot use secret-based auth")
+		}
+		if secret == "" {
+			return errors.New("invalid_client: client_secret is required")
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(secret)); err != nil {
+			return errors.New("invalid_client: secret mismatch")
+		}
+		// Enforce the registered method if it was explicitly set and method is known
+		if usedMethod != "" && usedMethod != expected {
+			return errors.New("invalid_client: wrong auth method, expected " + expected)
+		}
+		return nil
+	default:
+		return errors.New("invalid_client: unsupported auth method")
+	}
 }

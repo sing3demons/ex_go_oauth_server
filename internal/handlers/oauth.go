@@ -586,15 +586,21 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	clientID := ctx.Req.FormValue("client_id")
 	clientSecret := ctx.Req.FormValue("client_secret")
 
-	// Postman บางทีส่ง client_id มาใน Body แต่ส่ง Secret ไปใน Basic Auth
-	basicID, basicSecret, ok := ctx.Req.BasicAuth()
-	if ok {
+	// Detect which auth method the client used
+	var usedAuthMethod string
+	basicID, basicSecret, hasBasicAuth := ctx.Req.BasicAuth()
+	if hasBasicAuth {
+		usedAuthMethod = "client_secret_basic"
 		if clientID == "" {
 			clientID = basicID
 		}
 		if clientSecret == "" {
 			clientSecret = basicSecret
 		}
+	} else if clientSecret != "" {
+		usedAuthMethod = "client_secret_post"
+	} else {
+		usedAuthMethod = "none"
 	}
 
 	var resp map[string]interface{}
@@ -604,19 +610,19 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	case "authorization_code":
 		redirectURI := ctx.Req.FormValue("redirect_uri")
 		codeVerifier := ctx.Req.FormValue("code_verifier")
-		resp, err = h.oauthService.ExchangeToken(ctx, code, clientID, clientSecret, redirectURI, codeVerifier)
+		resp, err = h.oauthService.ExchangeToken(ctx, code, clientID, clientSecret, redirectURI, codeVerifier, usedAuthMethod)
 	case "refresh_token":
 		refreshToken := ctx.Req.FormValue("refresh_token")
-		resp, err = h.oauthService.RefreshToken(ctx, refreshToken, clientID, clientSecret)
+		resp, err = h.oauthService.RefreshToken(ctx, refreshToken, clientID, clientSecret, usedAuthMethod)
 	case "client_credentials":
 		scopes := strings.Fields(ctx.Req.FormValue("scope"))
-		resp, err = h.oauthService.ClientCredentials(ctx, clientID, clientSecret, scopes)
+		resp, err = h.oauthService.ClientCredentials(ctx, clientID, clientSecret, scopes, usedAuthMethod)
 	case "urn:ietf:params:oauth:grant-type:token-exchange":
 		subjectToken := ctx.Req.FormValue("subject_token")
 		subjectTokenType := ctx.Req.FormValue("subject_token_type")
 		audience := ctx.Req.FormValue("audience")
 		scopes := strings.Fields(ctx.Req.FormValue("scope"))
-		resp, err = h.oauthService.TokenExchange(ctx, subjectToken, subjectTokenType, clientID, clientSecret, scopes, audience)
+		resp, err = h.oauthService.TokenExchange(ctx, subjectToken, subjectTokenType, clientID, clientSecret, scopes, audience, usedAuthMethod)
 	}
 
 	if err != nil {
@@ -748,15 +754,21 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 	clientID := ctx.Req.FormValue("client_id")
 	clientSecret := ctx.Req.FormValue("client_secret")
 
-	// รองรับ Basic Auth
-	basicID, basicSecret, ok := ctx.Req.BasicAuth()
-	if ok {
+	// Detect auth method
+	var usedAuthMethod string
+	basicID, basicSecret, hasBasicAuth := ctx.Req.BasicAuth()
+	if hasBasicAuth {
+		usedAuthMethod = "client_secret_basic"
 		if clientID == "" {
 			clientID = basicID
 		}
 		if clientSecret == "" {
 			clientSecret = basicSecret
 		}
+	} else if clientSecret != "" {
+		usedAuthMethod = "client_secret_post"
+	} else {
+		usedAuthMethod = "none"
 	}
 
 	if token == "" || clientID == "" {
@@ -767,7 +779,7 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 		return
 	}
 
-	err := h.oauthService.RevokeToken(ctx, token, clientID, clientSecret)
+	err := h.oauthService.RevokeToken(ctx, token, clientID, clientSecret, usedAuthMethod)
 	if err != nil {
 		ctx.JsonError(&response.Error{
 			Err:     err,
