@@ -5,8 +5,8 @@ import (
 
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/services"
-	"github.com/sing3demons/oauth_server/pkg/errors"
 	"github.com/sing3demons/oauth_server/pkg/kp"
+	"github.com/sing3demons/oauth_server/pkg/response"
 )
 
 type DiscoveryHandler struct {
@@ -43,11 +43,10 @@ func (h *DiscoveryHandler) JWKS(ctx *kp.Ctx) {
 	jwks, err := h.ks.GetJWKS(ctx)
 	if err != nil {
 		// http.Error(w, "Failed to get JWKS", http.StatusInternalServerError)
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Failed to get JWKS",
-			AppResultCode: "50000",
-		}, map[string]string{"error": "system_error"})
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.SystemError,
+		}, response.SystemError.Error())
 		return
 	}
 

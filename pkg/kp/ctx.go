@@ -17,11 +17,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sing3demons/oauth_server/internal/config"
-	"github.com/sing3demons/oauth_server/pkg/errors"
 	"github.com/sing3demons/oauth_server/pkg/logAction"
 	"github.com/sing3demons/oauth_server/pkg/logger"
 	"github.com/sing3demons/oauth_server/pkg/middleware"
 	"github.com/sing3demons/oauth_server/pkg/mlog"
+	"github.com/sing3demons/oauth_server/pkg/response"
 )
 
 const MaxBodySize = 10 << 20 // 10 MB
@@ -490,7 +490,7 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 	return nil
 }
 
-func (c *Ctx) JsonError(err *errors.Error, body any) error {
+func (c *Ctx) JsonError(err *response.Error, body any) error {
 	c.ensureRequestMetadata(c.cmd, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
 	c.Res.Header().Set("X-Session-ID", c.sessionId)
@@ -551,20 +551,18 @@ func (c *Ctx) RenderTemplate(templateName string, data any) error {
 
 	tmpl, err := template.ParseFiles(templateName)
 	if err != nil {
-		summaryLogger.FlushError(&errors.Error{
-			Message:       "Failed to parse template",
-			Err:           err,
-			AppResultCode: "50000",
+		summaryLogger.FlushError(&response.Error{
+			Message: response.SystemError,
+			Err:     err,
 		})
 		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	res := tmpl.Execute(c.Res, data)
 	if res != nil {
-		summaryLogger.FlushError(&errors.Error{
-			Message:       "Failed to execute template",
-			Err:           res,
-			AppResultCode: "50000",
+		summaryLogger.FlushError(&response.Error{
+			Message: response.SystemError,
+			Err:     res,
 		})
 		return fmt.Errorf("failed to execute template: %w", res)
 	} else {

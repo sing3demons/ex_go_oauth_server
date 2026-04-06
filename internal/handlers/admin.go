@@ -11,7 +11,6 @@ import (
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
-	"github.com/sing3demons/oauth_server/pkg/errors"
 	"github.com/sing3demons/oauth_server/pkg/kp"
 	"github.com/sing3demons/oauth_server/pkg/response"
 	"golang.org/x/crypto/bcrypt"
@@ -43,20 +42,18 @@ func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
 
 	if err := ctx.Bind(&req); err != nil {
 		// http.Error(w, "Invalid input JSON", http.StatusBadRequest)
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Invalid input JSON",
-			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Failed to hash password",
-			AppResultCode: response.ServerError.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.ServerError,
 		}, response.ServerError.Error())
 		return
 	}
@@ -70,10 +67,9 @@ func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
 	}
 
 	if err := h.userRepo.Create(ctx, user); err != nil {
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Failed to create user",
-			AppResultCode: response.ServerError.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.ServerError,
 		}, response.ServerError.Error())
 		return
 	}
@@ -91,10 +87,9 @@ func (h *AdminHandler) CreateClient(ctx *kp.Ctx) {
 	ctx.Log("create_client")
 	var req CreateClientRequest
 	if err := ctx.Bind(&req); err != nil {
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Invalid input JSON",
-			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
@@ -110,10 +105,9 @@ func (h *AdminHandler) CreateClient(ctx *kp.Ctx) {
 	}
 
 	if err := h.clientRepo.Create(ctx, client); err != nil {
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Failed to create client",
-			AppResultCode: response.ServerError.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.ServerError,
 		}, response.ServerError.Error())
 		return
 	}
@@ -132,10 +126,9 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 	ctx.Log("admin_dashboard")
 	clients, err := h.clientRepo.FindAll(ctx)
 	if err != nil {
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Failed to fetch clients",
-			AppResultCode: response.ServerError.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.ServerError,
 		}, response.ServerError.Error())
 		return
 	}
@@ -168,10 +161,9 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 	ctx.Log("create_client_ui")
 	if err := ctx.Req.ParseForm(); err != nil {
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Invalid form submission",
-			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
@@ -271,25 +263,14 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 	}
 
 	if err := h.clientRepo.Create(ctx.Req.Context(), client); err != nil {
-		ctx.JsonError(&errors.Error{
-			Err:           err,
-			Message:       "Failed to create client",
-			AppResultCode: response.ServerError.ResultCode(),
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.ServerError,
 		}, response.ServerError.Error())
 		return
 	}
 
 	if clientType == "confidential" {
-		// tmpl, err := template.ParseFiles("templates/client_success.html")
-		// if err != nil {
-		// 	// http.Error(w, "Failed to load success template", http.StatusInternalServerError)
-		// 	ctx.JsonError(&errors.Error{
-		// 		Err:           err,
-		// 		Message:       "Failed to load success template",
-		// 		AppResultCode: response.ServerError.ResultCode(),
-		// 	}, response.ServerError.Error())
-		// 	return
-		// }
 		data := struct {
 			ClientID     string
 			ClientName   string

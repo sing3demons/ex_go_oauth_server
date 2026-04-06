@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sing3demons/oauth_server/pkg/errors"
+	"github.com/sing3demons/oauth_server/pkg/response"
 )
 
 // SummaryParamsType defines parameters specific to summary logs
@@ -122,7 +122,7 @@ func (s *SummaryLogger) FlushWithParams(params SummaryParamsType) {
 	s.baseLogger.LogInfo(dto)
 }
 
-func (s *SummaryLogger) FlushError(err *errors.Error) {
+func (s *SummaryLogger) FlushError(err *response.Error) {
 	dto := s.customLogger.GetLogDto()
 
 	// Inject summary properties
