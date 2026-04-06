@@ -72,6 +72,12 @@
                     <label class="checkbox-item"><input type="checkbox" name="scopes" value="write:data"> write:data</label>
                 </div>
 
+                <label>Grant Types</label>
+                <div class="checkbox-group">
+                    <label class="checkbox-item"><input type="checkbox" name="grant_types" value="authorization_code" checked> authorization_code</label>
+                    <label class="checkbox-item"><input type="checkbox" name="grant_types" value="refresh_token"> refresh_token</label>
+                </div>
+
                 <div class="switch-wrapper">
                     <label class="switch">
                         <input type="checkbox" name="require_pkce" value="true" checked>
@@ -96,6 +102,7 @@
                         <th>PKCE</th>
                         <th>Redirect URIs</th>
                         <th>Scopes</th>
+                        <th>Grant Types</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -125,6 +132,11 @@
                         <td>
                             {{range .AllowedScopes}}
                                 <span class="badge">{{.}}</span>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{range .GrantTypes}}
+                                <span class="badge" style="background:#e2d9f3;color:#6f42c1;">{{.}}</span>
                             {{end}}
                         </td>
                     </tr>

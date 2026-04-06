@@ -85,10 +85,44 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 		}
 	}
 
+	// Scope Validation
+	requestedScopes := strings.Fields(query.Get("scope")) // strings.Fields ตัด space ซ้อน
+
+	// 1. openid scope บังคับใน OIDC (RFC)
+	hasOpenID := false
+	for _, s := range requestedScopes {
+		if s == "openid" {
+			hasOpenID = true
+			break
+		}
+	}
+	if !hasOpenID {
+		return response.InvalidScope, &pkgErrors.Error{
+			Err:           fmt.Errorf("scope 'openid' is required"),
+			Message:       "scope 'openid' is required for OIDC requests",
+			AppResultCode: response.InvalidScope.ResultCode(),
+		}
+	}
+
+	// 2. ตรวจว่า Client อนุญาต Scopes ที่ขอไหม
+	allowedSet := make(map[string]struct{}, len(client.AllowedScopes))
+	for _, s := range client.AllowedScopes {
+		allowedSet[s] = struct{}{}
+	}
+	for _, s := range requestedScopes {
+		if _, ok := allowedSet[s]; !ok {
+			return response.InvalidScope, &pkgErrors.Error{
+				Err:           fmt.Errorf("scope '%s' is not allowed for this client", s),
+				Message:       fmt.Sprintf("scope '%s' is not allowed for client '%s'", s, clientID),
+				AppResultCode: response.InvalidScope.ResultCode(),
+			}
+		}
+	}
+
 	tx := &models.AuthTransaction{
 		ClientID:            clientID,
 		RedirectURI:         redirectURI,
-		Scopes:              strings.Split(query.Get("scope"), " "),
+		Scopes:              requestedScopes,
 		State:               query.Get("state"),
 		Nonce:               query.Get("nonce"),
 		CodeChallenge:       query.Get("code_challenge"),

@@ -143,6 +143,30 @@ func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
 	if len(scopes) == 0 {
 		scopes = []string{}
 	}
+	
+	// รับ grant_types จาก Form (checkbox)
+	// Grant types ที่รองรับ: "authorization_code", "refresh_token"
+	allowedGrantTypes := map[string]bool{
+		"authorization_code": true,
+		"refresh_token":      true,
+	}
+	grantTypes := r.Form["grant_types"]
+	if len(grantTypes) == 0 {
+		// Default: authorization_code เสมอ
+		grantTypes = []string{"authorization_code"}
+	} else {
+		// Whitelist validation
+		var validGrants []string
+		for _, gt := range grantTypes {
+			if allowedGrantTypes[gt] {
+				validGrants = append(validGrants, gt)
+			}
+		}
+		if len(validGrants) == 0 {
+			validGrants = []string{"authorization_code"}
+		}
+		grantTypes = validGrants
+	}
 
 	// Clean up Redirect URIs (comma separated)
 	var redirectURIs []string
@@ -180,7 +204,7 @@ func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
 		ClientType:       clientType,
 		ClientName:       clientName,
 		RedirectURIs:     redirectURIs,
-		GrantTypes:       []string{"authorization_code"},
+		GrantTypes:       grantTypes,
 		AllowedScopes:    scopes,
 		RequirePKCE:      requirePKCE,
 	}
