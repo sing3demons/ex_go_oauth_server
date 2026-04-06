@@ -19,19 +19,19 @@ func NewDiscoveryHandler(cfg *config.Config, ks *services.KeyService) *Discovery
 }
 
 func (h *DiscoveryHandler) OpenIDConfiguration(ctx *kp.Ctx) {
-	discovery := map[string]interface{}{
+	discovery := map[string]any{
 		"issuer":                                h.cfg.Issuer,
 		"authorization_endpoint":                h.cfg.Issuer + "/authorize",
 		"token_endpoint":                        h.cfg.Issuer + "/token",
 		"userinfo_endpoint":                     h.cfg.Issuer + "/userinfo",
 		"jwks_uri":                              h.cfg.Issuer + "/jwks.json",
-		"scopes_supported":                      []string{"openid", "profile", "email", "offline_access"},
-		"response_types_supported":              []string{"code"},
-		"grant_types_supported":                 []string{"authorization_code", "client_credentials", "refresh_token"},
-		"subject_types_supported":               []string{"public"},
-		"id_token_signing_alg_values_supported": []string{"RS256"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
-		"claims_supported":                      []string{"sub", "iss", "aud", "exp", "iat", "name", "email"},
+		"scopes_supported":                      h.cfg.GetArray("oidc.scopes_supported"),
+		"response_types_supported":              h.cfg.GetArray("oidc.response_types_supported"),
+		"grant_types_supported":                 h.cfg.GetArray("oidc.grant_types_supported"),
+		"subject_types_supported":               h.cfg.GetArray("oidc.subject_types_supported"),
+		"id_token_signing_alg_values_supported": h.cfg.GetArray("oidc.id_token_signing_alg_values_supported"),
+		"token_endpoint_auth_methods_supported": h.cfg.GetArray("oidc.token_endpoint_auth_methods_supported"),
+		"claims_supported":                      h.cfg.GetArray("oidc.claims_supported"),
 	}
 
 	ctx.Json(http.StatusOK, discovery)

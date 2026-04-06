@@ -28,12 +28,25 @@ type Config struct {
 	AdminUsername        string
 	AdminPassword        string
 
+	Oidc OIDC
+
 	LoggerConfig LogConfig
 }
 
+type OIDC struct {
+	SupportedScopes          []string `yaml:"scopes_supported"`
+	SupportedResponseTypes   []string `yaml:"response_types_supported"`
+	SupportedGrantTypes      []string `yaml:"grant_types_supported"`
+	SupportedSubjectTypes    []string `yaml:"subject_types_supported"`
+	IdTokenSigningAlgs       []string `yaml:"id_token_signing_alg_values_supported"`
+	TokenEndpointAuthMethods []string `yaml:"token_endpoint_auth_methods_supported"`
+	ClaimsSupported          []string `yaml:"claims_supported"`
+}
+
 type YamlConfig struct {
-	App AppConfig `yaml:"app"`
-	Log LogConfig `yaml:"log"`
+	App  AppConfig `yaml:"app"`
+	Log  LogConfig `yaml:"log"`
+	Oidc OIDC      `yaml:"oidc"`
 }
 type AppConfig struct {
 	Name          string `yaml:"name"`
@@ -169,6 +182,7 @@ func LoadConfig() *Config {
 		AdminUsername:        getEnv("ADMIN_USERNAME", ""),
 		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
 		LoggerConfig:         yamlCfg.Log,
+		Oidc:                 yamlCfg.Oidc,
 	}
 }
 
@@ -185,6 +199,7 @@ func (c *Config) Get(key string) any {
 		"admin_username": c.AdminUsername,
 		"admin_password": c.AdminPassword,
 		"logger_config":  c.LoggerConfig,
+		"oidc":           c.Oidc,
 	}
 
 	parts := strings.SplitN(key, ".", 2)
@@ -198,6 +213,18 @@ func (c *Config) Get(key string) any {
 	}
 
 	return getNestedField(val, parts[1])
+}
+
+func (c *Config) GetArray(key string) []string {
+	result := []string{}
+
+	if val := c.Get(key); val != nil {
+		if arr, ok := val.([]string); ok {
+			result = arr
+		}
+	}
+
+	return result
 }
 
 func getNestedField(obj any, key string) any {
