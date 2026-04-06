@@ -28,9 +28,15 @@ type Config struct {
 	AdminUsername        string
 	AdminPassword        string
 
-	Oidc OIDC
+	Oidc           OIDC
+	TrustedIssuers []TrustedIssuer
 
 	LoggerConfig LogConfig
+}
+
+type TrustedIssuer struct {
+	Issuer string `yaml:"issuer"`
+	Name   string `yaml:"name"`
 }
 
 type OIDC struct {
@@ -44,9 +50,10 @@ type OIDC struct {
 }
 
 type YamlConfig struct {
-	App  AppConfig `yaml:"app"`
-	Log  LogConfig `yaml:"log"`
-	Oidc OIDC      `yaml:"oidc"`
+	App            AppConfig       `yaml:"app"`
+	Log            LogConfig       `yaml:"log"`
+	Oidc           OIDC            `yaml:"oidc"`
+	TrustedIssuers []TrustedIssuer `yaml:"trusted_issuers"`
 }
 type AppConfig struct {
 	Name          string `yaml:"name"`
@@ -183,6 +190,7 @@ func LoadConfig() *Config {
 		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
 		LoggerConfig:         yamlCfg.Log,
 		Oidc:                 yamlCfg.Oidc,
+		TrustedIssuers:       yamlCfg.TrustedIssuers,
 	}
 }
 

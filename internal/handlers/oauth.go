@@ -538,7 +538,7 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	}
 
 	grantType := ctx.Req.FormValue("grant_type")
-	if grantType != "authorization_code" && grantType != "refresh_token" && grantType != "client_credentials" {
+	if grantType != "authorization_code" && grantType != "refresh_token" && grantType != "client_credentials" && grantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
 		ctx.Log("token")
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("Unsupported grant type: %s", grantType),
@@ -578,6 +578,12 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	case "client_credentials":
 		scopes := strings.Fields(ctx.Req.FormValue("scope"))
 		resp, err = h.oauthService.ClientCredentials(ctx, clientID, clientSecret, scopes)
+	case "urn:ietf:params:oauth:grant-type:token-exchange":
+		subjectToken := ctx.Req.FormValue("subject_token")
+		subjectTokenType := ctx.Req.FormValue("subject_token_type")
+		audience := ctx.Req.FormValue("audience")
+		scopes := strings.Fields(ctx.Req.FormValue("scope"))
+		resp, err = h.oauthService.TokenExchange(ctx, subjectToken, subjectTokenType, clientID, clientSecret, scopes, audience)
 	}
 
 	if err != nil {

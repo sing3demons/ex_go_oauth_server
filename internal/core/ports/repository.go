@@ -22,14 +22,14 @@ type ClientRepository interface {
 
 type KeyRepository interface {
 	Insert(ctx context.Context, key *models.KeyRecord) error
-	FindLatest(ctx context.Context) (*models.KeyRecord, error)
+	FindLatest(ctx context.Context, alg string) (*models.KeyRecord, error)
 	FindAll(ctx context.Context) ([]*models.KeyRecord, error)
-	DeleteOldKeys(ctx context.Context, retainCount int) error
+	DeleteOldKeys(ctx context.Context, alg string, retainCount int) error
 }
 
 type KeyCache interface {
-	GetRaw(ctx context.Context) (*models.KeyRecord, error)
-	SetRaw(ctx context.Context, key *models.KeyRecord) error
+	GetRaw(ctx context.Context, alg string) (*models.KeyRecord, error)
+	SetRaw(ctx context.Context, alg string, key *models.KeyRecord) error
 }
 
 type RefreshTokenRepository interface {

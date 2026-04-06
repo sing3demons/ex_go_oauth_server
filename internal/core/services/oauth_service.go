@@ -14,6 +14,7 @@ import (
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
+	"github.com/sing3demons/oauth_server/pkg/jwks"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -22,8 +23,9 @@ type OAuthService struct {
 	authCache  ports.AuthCodeCache
 	rtRepo     ports.RefreshTokenRepository
 	keyService *KeyService
-	userRepo   ports.UserRepository
-	cfg        *config.Config
+	userRepo    ports.UserRepository
+	cfg         *config.Config
+	jwksFetcher *jwks.ExternalJWKSFetcher
 }
 
 func NewOAuthService(
@@ -39,8 +41,9 @@ func NewOAuthService(
 		authCache:  authCache,
 		rtRepo:     rtRepo,
 		keyService: keyService,
-		userRepo:   userRepo,
-		cfg:        cfg,
+		userRepo:    userRepo,
+		cfg:         cfg,
+		jwksFetcher: jwks.NewExternalJWKSFetcher(),
 	}
 }
 
@@ -160,11 +163,18 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		}
 	}
 
-	// 4. ไปคว้ากุญแจ Signature (RSA) จาก KeyService (Redis/Mongo)
-	keyMgr, err := s.keyService.GetActiveKeyManager(ctx)
+	alg := client.IDTokenSignedResponseAlg
+	if alg == "" {
+		alg = "RS256"
+	}
+	
+	// 4. ไปคว้ากุญแจ Signature จาก KeyService (Redis/Mongo)
+	keyMgr, err := s.keyService.GetActiveKeyManager(ctx, alg)
 	if err != nil {
 		return nil, errors.New("internal_server_error_keys")
 	}
+
+	signingMethod := s.getSigningMethod(alg)
 
 	// 5. ปั้น Access Token (JWT)
 	now := time.Now()
@@ -176,7 +186,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		"iat":    now.Unix(),
 		"scopes": info.Scopes,
 	}
-	atToken := jwt.NewWithClaims(jwt.SigningMethodRS256, atClaims)
+	atToken := jwt.NewWithClaims(signingMethod, atClaims)
 	atToken.Header["kid"] = keyMgr.KeyID
 
 	accessToken, err := atToken.SignedString(keyMgr.PrivateKey)
@@ -250,7 +260,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 			}
 		}
 
-		idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, idClaims)
+		idToken := jwt.NewWithClaims(signingMethod, idClaims)
 		idToken.Header["kid"] = keyMgr.KeyID
 
 		idTokenStr, err := idToken.SignedString(keyMgr.PrivateKey)
@@ -298,10 +308,17 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 	// Optionally revoke the old one, but for resilience, some keep it. Let's rotate it:
 	s.rtRepo.Delete(ctx, refreshTokenStr)
 
-	keyMgr, err := s.keyService.GetActiveKeyManager(ctx)
+	alg := client.IDTokenSignedResponseAlg
+	if alg == "" {
+		alg = "RS256"
+	}
+
+	keyMgr, err := s.keyService.GetActiveKeyManager(ctx, alg)
 	if err != nil {
 		return nil, errors.New("internal_server_error_keys")
 	}
+
+	signingMethod := s.getSigningMethod(alg)
 
 	now := time.Now()
 	atClaims := jwt.MapClaims{
@@ -312,7 +329,7 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 		"iat":    now.Unix(),
 		"scopes": rt.Scopes,
 	}
-	atToken := jwt.NewWithClaims(jwt.SigningMethodRS256, atClaims)
+	atToken := jwt.NewWithClaims(signingMethod, atClaims)
 	atToken.Header["kid"] = keyMgr.KeyID
 
 	accessToken, err := atToken.SignedString(keyMgr.PrivateKey)
@@ -430,10 +447,16 @@ func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSe
 	}
 
 	// 6. ดึง Signing Key
-	keyMgr, err := s.keyService.GetActiveKeyManager(ctx)
+	alg := client.IDTokenSignedResponseAlg
+	if alg == "" {
+		alg = "RS256"
+	}
+	keyMgr, err := s.keyService.GetActiveKeyManager(ctx, alg)
 	if err != nil {
 		return nil, errors.New("internal_server_error_keys")
 	}
+
+	signingMethod := s.getSigningMethod(alg)
 
 	// 7. สร้าง Access Token (ไม่มี sub เพราะไม่มี User)
 	now := time.Now()
@@ -446,7 +469,7 @@ func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSe
 		"scopes": finalScopes,
 		"client_credentials": true, // บอก downstream ว่า flow นี้ไม่ใช่ user
 	}
-	atToken := jwt.NewWithClaims(jwt.SigningMethodRS256, atClaims)
+	atToken := jwt.NewWithClaims(signingMethod, atClaims)
 	atToken.Header["kid"] = keyMgr.KeyID
 
 	accessToken, err := atToken.SignedString(keyMgr.PrivateKey)
@@ -519,4 +542,193 @@ func (s *OAuthService) RevokeToken(ctx context.Context, tokenStr string, clientI
 	// ลบออกไป (ถ้าไม่มีในระบบ ก็ให้ถือว่าสำเร็จ 200 OK ตาม RFC)
 	s.rtRepo.Delete(ctx, tokenStr)
 	return nil
+}
+
+// TokenExchange handles the RFC 8693 token exchange.
+func (s *OAuthService) TokenExchange(
+	ctx context.Context, subjectToken, subjectTokenType, clientID, clientSecret string,
+	requestedScopes []string, audience string,
+) (map[string]interface{}, error) {
+	// 1. Validate Client
+	client, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		return nil, errors.New("invalid_client")
+	}
+	if client.ClientType == "confidential" {
+		if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
+			return nil, errors.New("invalid_client")
+		}
+	}
+
+	hasGrant := false
+	for _, g := range client.GrantTypes {
+		if g == "urn:ietf:params:oauth:grant-type:token-exchange" {
+			hasGrant = true
+			break
+		}
+	}
+	if !hasGrant {
+		return nil, errors.New("unauthorized_client: token-exchange not allowed")
+	}
+
+	// 2. Decode original token (without full verification at first)
+	token, _, err := new(jwt.Parser).ParseUnverified(subjectToken, jwt.MapClaims{})
+	if err != nil {
+		return nil, errors.New("invalid_request: unable to parse subject_token")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("invalid_request: unable to parse claims")
+	}
+
+	originalIss, _ := claims["iss"].(string)
+
+	var subject string
+	var grantedScopes []string
+
+	// 3. Verify based on Internal vs External
+	if originalIss == s.cfg.Issuer {
+		// --- INTERNAL TOKEN EXCHANGE ---
+		_, err := s.ValidateAccessToken(ctx, subjectToken)
+		if err != nil {
+			return nil, errors.New("invalid_token: " + err.Error())
+		}
+		
+		sub, ok := claims["sub"].(string)
+		if !ok {
+			return nil, errors.New("invalid_token: missing sub")
+		}
+		subject = sub
+
+		// Read scopes
+		switch scopesVal := claims["scopes"].(type) {
+		case []interface{}:
+			for _, v := range scopesVal {
+				if sStr, ok := v.(string); ok {
+					grantedScopes = append(grantedScopes, sStr)
+				}
+			}
+		}
+
+	} else {
+		// --- EXTERNAL FEDERATION ---
+		// Find in config
+		var trusted *config.TrustedIssuer
+		for _, t := range s.cfg.TrustedIssuers {
+			if t.Issuer == originalIss {
+				trusted = &t
+				break
+			}
+		}
+		if trusted == nil {
+			return nil, errors.New("invalid_request: untrusted issuer")
+		}
+
+		// Validate token with external jwks
+		keyFunc := func(token *jwt.Token) (interface{}, error) {
+			kid, ok := token.Header["kid"].(string)
+			if !ok {
+				return nil, errors.New("missing kid")
+			}
+			return s.jwksFetcher.GetPublicKey(trusted.Issuer, kid)
+		}
+
+		parsed, err := jwt.Parse(subjectToken, keyFunc)
+		if err != nil || !parsed.Valid {
+			return nil, errors.New("invalid_token: signature verification failed")
+		}
+
+		// Extract subject
+		extSub, _ := claims["sub"].(string)
+		subject = trusted.Name + "|" + extSub
+		
+		// External tokens might use 'scope' (string) instead of 'scopes' (array)
+		if scopeStr, ok := claims["scope"].(string); ok {
+			grantedScopes = strings.Fields(scopeStr)
+		}
+	}
+
+	// 4. Downscope / Intersection logic
+	allowedMap := make(map[string]bool, len(client.AllowedScopes))
+	for _, s := range client.AllowedScopes {
+		allowedMap[s] = true
+	}
+	grantedMap := make(map[string]bool, len(grantedScopes))
+	for _, s := range grantedScopes {
+		grantedMap[s] = true
+	}
+
+	var finalScopes []string
+	if len(requestedScopes) > 0 {
+		// requested has to exist in BOTH original token AND client allowed scopes
+		for _, s := range requestedScopes {
+			if allowedMap[s] && grantedMap[s] {
+				finalScopes = append(finalScopes, s)
+			}
+		}
+	} else {
+		// default to intersection of original and client allowed
+		for s := range grantedMap {
+			if allowedMap[s] {
+				finalScopes = append(finalScopes, s)
+			}
+		}
+	}
+
+	// 5. Generate New Token
+	alg := client.IDTokenSignedResponseAlg
+	if alg == "" {
+		alg = "RS256"
+	}
+	keyMgr, err := s.keyService.GetActiveKeyManager(ctx, alg)
+	if err != nil {
+		return nil, errors.New("internal_server_error_keys")
+	}
+	
+	signingMethod := s.getSigningMethod(alg)
+
+	now := time.Now()
+	newClaims := jwt.MapClaims{
+		"iss":    s.cfg.Issuer,
+		"sub":    subject,
+		"exp":    now.Add(1 * time.Hour).Unix(),
+		"iat":    now.Unix(),
+		"scopes": finalScopes,
+		"act": map[string]string{
+			"sub": clientID, // Token Exchange indicates who the actor is
+		},
+	}
+	if audience != "" {
+		newClaims["aud"] = audience
+	}
+
+	atToken := jwt.NewWithClaims(signingMethod, newClaims)
+	atToken.Header["kid"] = keyMgr.KeyID
+
+	accessToken, err := atToken.SignedString(keyMgr.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// 6. Return response according to RFC 8693
+	return map[string]interface{}{
+		"access_token": accessToken,
+		"issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+		"token_type":   "Bearer",
+		"expires_in":   3600,
+		"scope":        strings.Join(finalScopes, " "),
+	}, nil
+}
+
+func (s *OAuthService) getSigningMethod(alg string) jwt.SigningMethod {
+	switch alg {
+	case "ES256":
+		return jwt.SigningMethodES256
+	case "EdDSA":
+		return jwt.SigningMethodEdDSA
+	case "RS256":
+		return jwt.SigningMethodRS256
+	default:
+		return jwt.SigningMethodRS256
+	}
 }

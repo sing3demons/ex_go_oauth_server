@@ -20,8 +20,8 @@ func NewKeyCache(client *redis.Client) *KeyCache {
 	return &KeyCache{client: client}
 }
 
-func (c *KeyCache) GetRaw(ctx context.Context) (*models.KeyRecord, error) {
-	key_cache := "jwks:current"
+func (c *KeyCache) GetRaw(ctx context.Context, alg string) (*models.KeyRecord, error) {
+	key_cache := "jwks:current:" + alg
 	start := time.Now()
 	_log := mlog.L(ctx)
 	_log.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -60,9 +60,9 @@ func (c *KeyCache) GetRaw(ctx context.Context) (*models.KeyRecord, error) {
 	return &key, nil
 }
 
-func (c *KeyCache) SetRaw(ctx context.Context, key *models.KeyRecord) error {
+func (c *KeyCache) SetRaw(ctx context.Context, alg string, key *models.KeyRecord) error {
 	start := time.Now()
-	key_cache := "jwks:current"
+	key_cache := "jwks:current:" + alg
 	_log := mlog.L(ctx)
 
 	data, err := json.Marshal(key)

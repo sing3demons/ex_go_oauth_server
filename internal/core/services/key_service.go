@@ -16,38 +16,47 @@ type KeyService struct {
 	keyCache          ports.KeyCache
 	rotationTime      time.Duration
 	maxRetentionCount int
+	supportedAlgs     []string
 }
 
-func NewKeyService(keyRepo ports.KeyRepository, keyCache ports.KeyCache, rotationTime time.Duration, maxRetentionCount int) *KeyService {
+func NewKeyService(keyRepo ports.KeyRepository, keyCache ports.KeyCache, rotationTime time.Duration, maxRetentionCount int, supportedAlgs []string) *KeyService {
+	if len(supportedAlgs) == 0 {
+		supportedAlgs = []string{"RS256"}
+	}
 	return &KeyService{
 		keyRepo:           keyRepo,
 		keyCache:          keyCache,
 		rotationTime:      rotationTime,
 		maxRetentionCount: maxRetentionCount,
+		supportedAlgs:     supportedAlgs,
 	}
 }
 
 // GetActiveKeyManager มองหากุญแจที่ยังใช้งานได้อยู่จาก Redis หรือ Mongo
-func (s *KeyService) GetActiveKeyManager(ctx context.Context) (*crypto.CryptoManager, error) {
+func (s *KeyService) GetActiveKeyManager(ctx context.Context, alg string) (*crypto.CryptoManager, error) {
+	if alg == "" {
+		alg = "RS256"
+	}
+	
 	// 1. Check in Redis
-	keyRecord, err := s.keyCache.GetRaw(ctx)
+	keyRecord, err := s.keyCache.GetRaw(ctx, alg)
 	if err == nil && keyRecord != nil {
 		// Found in Redis
-		return crypto.ParseFromPEM(keyRecord.PrivateKeyPEM, keyRecord.Kid)
+		return crypto.ParseFromPEM(keyRecord.PrivateKeyPEM, keyRecord.Kid, keyRecord.Kty, keyRecord.Alg)
 	}
 
 	// 2. Not in Redis, Check Mongo for the latest
-	latestKey, err := s.keyRepo.FindLatest(ctx)
+	latestKey, err := s.keyRepo.FindLatest(ctx, alg)
 	if err == nil && latestKey != nil && latestKey.ExpiresAt.After(time.Now()) {
 		// Found active key in Mongo, restore to Redis cache
-		s.keyCache.SetRaw(ctx, latestKey)
-		return crypto.ParseFromPEM(latestKey.PrivateKeyPEM, latestKey.Kid)
+		s.keyCache.SetRaw(ctx, alg, latestKey)
+		return crypto.ParseFromPEM(latestKey.PrivateKeyPEM, latestKey.Kid, latestKey.Kty, latestKey.Alg)
 	}
 
 	// 3. Not found or expired, Generate a new Key
-	log.Println("Generating a new RSA Key Pair for JWT...")
+	log.Printf("Generating a new %s Key Pair for JWT...\n", alg)
 	kid := uuid.New().String()
-	newCryptoMgr, err := crypto.GenerateRSAKeyPair(kid)
+	newCryptoMgr, err := crypto.GenerateKeyPair(kid, alg)
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +67,8 @@ func (s *KeyService) GetActiveKeyManager(ctx context.Context) (*crypto.CryptoMan
 
 	newKeyRecord := &models.KeyRecord{
 		Kid:           kid,
+		Kty:           newCryptoMgr.Kty,
+		Alg:           newCryptoMgr.Alg,
 		PrivateKeyPEM: newCryptoMgr.PrivateKeyPEM(),
 		PublicKeyPEM:  newCryptoMgr.PublicKeyPEM(),
 		CreatedAt:     now,
@@ -69,20 +80,22 @@ func (s *KeyService) GetActiveKeyManager(ctx context.Context) (*crypto.CryptoMan
 	}
 
 	// ลบกุญแจเก่าที่เกินโควต้าทิ้ง (รักษาไว้แค่ maxRetentionCount อ้างอิงเวลาสร้างล่าสุด)
-	if err := s.keyRepo.DeleteOldKeys(ctx, s.maxRetentionCount); err != nil {
-		log.Printf("Warning: failed to prune old keys: %v", err)
+	if err := s.keyRepo.DeleteOldKeys(ctx, alg, s.maxRetentionCount); err != nil {
+		log.Printf("Warning: failed to prune old keys for %s: %v", alg, err)
 	}
 
-	s.keyCache.SetRaw(ctx, newKeyRecord)
+	s.keyCache.SetRaw(ctx, alg, newKeyRecord)
 
 	return newCryptoMgr, nil
 }
 
 // GetJWKS ดึงกุญแจทั้งหมดในระบบมาแพ็ครวมส่งให้ Endpoint JWKS
 func (s *KeyService) GetJWKS(ctx context.Context) (crypto.JWKS, error) {
-	// Trigger get or create active key first to ensure we have at least one
-	if _, err := s.GetActiveKeyManager(ctx); err != nil {
-		return crypto.JWKS{}, err
+	// Trigger get or create active key for all supported algorithms
+	for _, alg := range s.supportedAlgs {
+		if _, err := s.GetActiveKeyManager(ctx, alg); err != nil {
+			log.Printf("Failed to init key for %s: %v", alg, err)
+		}
 	}
 
 	// FindAll returns active keys + gracefully expired ones
@@ -93,7 +106,7 @@ func (s *KeyService) GetJWKS(ctx context.Context) (crypto.JWKS, error) {
 
 	var jwks crypto.JWKS
 	for _, rec := range records {
-		mgr, err := crypto.ParseFromPEM(rec.PrivateKeyPEM, rec.Kid)
+		mgr, err := crypto.ParseFromPEM(rec.PrivateKeyPEM, rec.Kid, rec.Kty, rec.Alg)
 		if err == nil {
 			jwks.Keys = append(jwks.Keys, mgr.GetJWK())
 		}

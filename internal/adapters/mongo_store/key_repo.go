@@ -72,17 +72,17 @@ func (r *KeyRepository) Insert(ctx context.Context, key *models.KeyRecord) error
 	return err
 }
 
-func (r *KeyRepository) FindLatest(ctx context.Context) (*models.KeyRecord, error) {
+func (r *KeyRepository) FindLatest(ctx context.Context, alg string) (*models.KeyRecord, error) {
 	start := time.Now()
 	_log := mlog.L(ctx)
 	_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency: r.colName,
-	}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), "keys.findOne({}, sort={created_at: -1})")
+	}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), fmt.Sprintf("keys.findOne({alg: %s}, sort={created_at: -1})", alg))
 
 	opts := options.FindOne().SetSort(bson.D{{Key: "created_at", Value: -1}})
 	var key models.KeyRecord
 
-	err := r.col.FindOne(ctx, bson.M{}, opts).Decode(&key)
+	err := r.col.FindOne(ctx, bson.M{"alg": alg}, opts).Decode(&key)
 
 	if err != nil {
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -138,15 +138,15 @@ func (r *KeyRepository) FindAll(ctx context.Context) ([]*models.KeyRecord, error
 	return keys, nil
 }
 
-func (r *KeyRepository) DeleteOldKeys(ctx context.Context, retainCount int) error {
+func (r *KeyRepository) DeleteOldKeys(ctx context.Context, alg string, retainCount int) error {
 	start := time.Now()
 	_log := mlog.L(ctx)
 	_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency: r.colName,
-	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), fmt.Sprintf("keys.find({}, sort={created_at: -1}, limit=%d)", retainCount))
+	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), fmt.Sprintf("keys.find({alg: %s}, sort={created_at: -1}, limit=%d)", alg, retainCount))
 
 	opts := options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}).SetLimit(int64(retainCount))
-	cursor, err := r.col.Find(ctx, bson.M{}, opts)
+	cursor, err := r.col.Find(ctx, bson.M{"alg": alg}, opts)
 	if err != nil {
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,
@@ -190,6 +190,7 @@ func (r *KeyRepository) DeleteOldKeys(ctx context.Context, retainCount int) erro
 	}).Info(logAction.DB_REQUEST(logAction.DB_DELETE, "app -> mongo"), fmt.Sprintf("keys.deleteMany({ _id: { $nin: %v } })", ids))
 
 	_, err = r.col.DeleteMany(ctx, bson.M{
+		"alg": alg,
 		"_id": bson.M{"$nin": ids},
 	})
 

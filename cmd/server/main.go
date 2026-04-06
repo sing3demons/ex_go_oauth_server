@@ -44,13 +44,14 @@ func main() {
 
 	// Init Core Key Service
 	rtRepo := mongo_store.NewRefreshTokenRepository(db)
-	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount)
+	supportedAlgs := cfg.GetArray("oidc.id_token_signing_alg_values_supported")
+	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount, supportedAlgs)
 	oauthService := services.NewOAuthService(clientRepo, authCodeCache, rtRepo, keyService, userRepo, cfg)
 
 	// Start Key generation or fetching
 	ctx := context.Background()
-	if _, err := keyService.GetActiveKeyManager(ctx); err != nil {
-		log.Fatalf("Failed to initialize RSA keys from Mongo/Redis: %v", err)
+	if _, err := keyService.GetJWKS(ctx); err != nil {
+		log.Fatalf("Failed to initialize cryptographic keys from Mongo/Redis: %v", err)
 	}
 	log.Println("JWKS Key Management Service Initialized Successfully")
 
