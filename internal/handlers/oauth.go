@@ -38,17 +38,10 @@ func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRep
 	}
 }
 
-type ResponseMessageError struct {
-	Message string `json:"error"`
-}
-
 func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (response.MessageError, *pkgErrors.Error) {
-	responseError := &ResponseMessageError{}
-
 	responseType := query.Get("response_type")
 	if responseType != "code" {
 		// http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
-		responseError.Message = "unsupported_response_type"
 		return response.UnsupportedResponseType, &pkgErrors.Error{
 			Err:           fmt.Errorf("unsupported response_type: %s", responseType),
 			Message:       fmt.Sprintf("Unsupported response_type: %s. Expected 'code'", responseType),
@@ -59,9 +52,8 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	clientID := query.Get("client_id")
 	redirectURI := query.Get("redirect_uri")
 	// Validate client exists and redirect_uri is registered
-	client, err := h.clientRepo.FindByID(ctx, clientID)
+	client, err := h.clientRepo.FindByIDWithCache(ctx, clientID)
 	if err != nil || client == nil {
-		responseError.Message = "invalid_client"
 		return response.InvalidClient, &pkgErrors.Error{
 			Err:           fmt.Errorf("client not found: %s", clientID),
 			Message:       "Invalid client_id",
@@ -77,7 +69,6 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 		}
 	}
 	if !validURI {
-		responseError.Message = "invalid_redirect_uri"
 		return response.InvalidGrant, &pkgErrors.Error{
 			Err:           fmt.Errorf("redirect_uri not registered: %s", redirectURI),
 			Message:       "redirect_uri is not registered for this client",
@@ -131,8 +122,6 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	}
 
 	if err := h.transactionCache.SetTransaction(ctx, tid, tx, 15*time.Minute); err != nil {
-		// http.Error(w, "Server Error", http.StatusInternalServerError)
-		responseError.Message = "system_error"
 		return response.SystemError, &pkgErrors.Error{
 			Err:           err,
 			Message:       "Failed to set transaction",
@@ -470,7 +459,7 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 		return
 	}
 
-	client, err := h.clientRepo.FindByID(ctx, tx.ClientID)
+	client, err := h.clientRepo.FindByIDWithCache(ctx, tx.ClientID)
 	if err != nil || client == nil {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Invalid Client"),

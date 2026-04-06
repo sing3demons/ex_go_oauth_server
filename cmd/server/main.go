@@ -37,7 +37,7 @@ func main() {
 
 	// Init Adapters for OAuth entities
 	userRepo := mongo_store.NewUserRepository(db)
-	clientRepo := mongo_store.NewClientRepository(db)
+	clientRepo := mongo_store.NewClientRepository(db, redisClient)
 	authCodeCache := redis_store.NewAuthCodeCache(redisClient)
 	sessionCache := redis_store.NewSessionCache(redisClient)
 	transactionCache := redis_store.NewTransactionCache(redisClient)

@@ -2,9 +2,11 @@ package mongo_store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/pkg/logAction"
 	"github.com/sing3demons/oauth_server/pkg/logger"
@@ -14,12 +16,14 @@ import (
 )
 
 type ClientRepository struct {
-	col *mongo.Collection
+	col    *mongo.Collection
+	client *redis.Client
 }
 
-func NewClientRepository(db *mongo.Database) *ClientRepository {
+func NewClientRepository(db *mongo.Database, redisClient *redis.Client) *ClientRepository {
 	return &ClientRepository{
-		col: db.Collection("clients"),
+		col:    db.Collection("clients"),
+		client: redisClient,
 	}
 }
 
@@ -136,4 +140,64 @@ func (r *ClientRepository) FindAll(ctx context.Context) ([]*models.Client, error
 	})
 
 	return clients, nil
+}
+
+func (r *ClientRepository) FindByIDWithCache(ctx context.Context, clientID string) (*models.Client, error) {
+	cacheKey := "client:" + clientID
+	start := time.Now()
+	_logger := mlog.L(ctx)
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: "redis",
+	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> redis"), map[string]any{"key": cacheKey})
+
+	val, err := r.client.Get(ctx, cacheKey).Result()
+	end := time.Since(start).Microseconds()
+	if err == nil {
+		var client models.Client
+		if err := json.Unmarshal([]byte(val), &client); err == nil {
+			_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+				Dependency:   "redis",
+				ResponseTime: end,
+				ResultCode:   "20000",
+			}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "redis -> app"), map[string]any{"key": cacheKey, "result": "hit"})
+			return &client, nil
+		}
+	}
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency:   "redis",
+		ResponseTime: end,
+		ResultCode:   "40400",
+	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "redis -> app"), map[string]any{"key": cacheKey, "result": "miss", "error": err.Error()})
+
+	client, err := r.FindByID(ctx, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	cacheData, err := json.Marshal(client)
+	if err == nil {
+		_start := time.Now()
+		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+			Dependency: "redis",
+		}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> redis"), map[string]any{"key": cacheKey, "action": "set"})
+		statusCmd := r.client.Set(ctx, cacheKey, cacheData, 1*time.Hour)
+		_end := time.Since(_start).Microseconds()
+		if err := statusCmd.Err(); err != nil {
+			_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+				Dependency:   "redis",
+				ResponseTime: _end,
+				ResultCode:   "50000",
+			}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "redis -> app"), map[string]any{"key": cacheKey, "action": "set", "error": err.Error()})
+		} else {
+			_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+				Dependency:   "redis",
+				ResponseTime: _end,
+				ResultCode:   "20000",
+			}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "redis -> app"), map[string]any{"key": cacheKey, "action": "set", "result": "success"})
+		}
+	}
+
+	return client, nil
 }

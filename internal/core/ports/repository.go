@@ -15,6 +15,7 @@ type UserRepository interface {
 
 type ClientRepository interface {
 	FindByID(ctx context.Context, clientID string) (*models.Client, error)
+	FindByIDWithCache(ctx context.Context, clientID string) (*models.Client, error)
 	FindAll(ctx context.Context) ([]*models.Client, error)
 	Create(ctx context.Context, client *models.Client) error
 }
