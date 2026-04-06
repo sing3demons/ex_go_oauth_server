@@ -63,7 +63,7 @@ func main() {
 	app.GET("/.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	app.GET("/jwks.json", discoveryHandler.JWKS)
 
-	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, clientRepo, sessionCache, transactionCache)
+	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, clientRepo, sessionCache, transactionCache, cfg)
 	app.GET("/authorize", oauthHandler.Authorize)
 	app.POST("/login", oauthHandler.LoginSubmit)
 	app.POST("/register", oauthHandler.RegisterSubmit)

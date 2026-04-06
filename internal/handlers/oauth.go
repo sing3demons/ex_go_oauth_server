@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
 	"github.com/sing3demons/oauth_server/internal/core/services"
@@ -26,22 +27,31 @@ type OAuthHandler struct {
 	clientRepo       ports.ClientRepository
 	sessionCache     ports.SessionCache
 	transactionCache ports.TransactionCache
+	cfg              *config.Config
 }
 
-func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRepository, clientRepo ports.ClientRepository, sessionCache ports.SessionCache, transactionCache ports.TransactionCache) *OAuthHandler {
+func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRepository, clientRepo ports.ClientRepository, sessionCache ports.SessionCache, transactionCache ports.TransactionCache, cfg *config.Config) *OAuthHandler {
 	return &OAuthHandler{
 		oauthService:     oauthService,
 		userRepo:         userRepo,
 		clientRepo:       clientRepo,
 		sessionCache:     sessionCache,
 		transactionCache: transactionCache,
+		cfg:              cfg,
 	}
 }
 
 func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (response.MessageError, *response.Error) {
 	responseType := query.Get("response_type")
-	if responseType != "code" {
-		// http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
+	// Validate response_type against server's supported list from config
+	responseTypeAllowed := false
+	for _, rt := range h.cfg.Oidc.SupportedResponseTypes {
+		if rt == responseType {
+			responseTypeAllowed = true
+			break
+		}
+	}
+	if !responseTypeAllowed {
 		return response.UnsupportedResponseType, &response.Error{
 			Err:     fmt.Errorf("unsupported response_type: %s", responseType),
 			Message: response.UnsupportedResponseType,
@@ -74,7 +84,7 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	}
 
 	// Scope Validation
-	requestedScopes := strings.Fields(query.Get("scope")) // strings.Fields ตัด space ซ้อน
+	requestedScopes := strings.Fields(query.Get("scope"))
 
 	// 1. openid scope บังคับใน OIDC (RFC)
 	hasOpenID := false
@@ -91,7 +101,20 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 		}
 	}
 
-	// 2. ตรวจว่า Client อนุญาต Scopes ที่ขอไหม
+	// 2. กรอง scope ที่ server รองรับก่อน (server-level)
+	serverScopesSet := make(map[string]struct{}, len(h.cfg.Oidc.SupportedScopes))
+	for _, s := range h.cfg.Oidc.SupportedScopes {
+		serverScopesSet[s] = struct{}{}
+	}
+	var serverFilteredScopes []string
+	for _, s := range requestedScopes {
+		if _, ok := serverScopesSet[s]; ok {
+			serverFilteredScopes = append(serverFilteredScopes, s)
+		}
+	}
+	requestedScopes = serverFilteredScopes
+
+	// 3. ตรวจว่า Client อนุญาต Scopes ที่ขอไหม (client-level)
 	allowedSet := make(map[string]struct{}, len(client.AllowedScopes))
 	for _, s := range client.AllowedScopes {
 		allowedSet[s] = struct{}{}
@@ -538,7 +561,17 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	}
 
 	grantType := ctx.Req.FormValue("grant_type")
-	if grantType != "authorization_code" && grantType != "refresh_token" && grantType != "client_credentials" && grantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
+
+	// Validate grant_type against server-supported list from config
+	supportedGrants := h.cfg.Oidc.SupportedGrantTypes
+	grantAllowed := false
+	for _, g := range supportedGrants {
+		if g == grantType {
+			grantAllowed = true
+			break
+		}
+	}
+	if !grantAllowed {
 		ctx.Log("token")
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("Unsupported grant type: %s", grantType),
