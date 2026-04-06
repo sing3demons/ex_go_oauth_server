@@ -15,6 +15,8 @@ import (
 	pkgErrors "github.com/sing3demons/oauth_server/pkg/errors"
 	"github.com/sing3demons/oauth_server/pkg/kp"
 	"github.com/sing3demons/oauth_server/pkg/logger"
+	"github.com/sing3demons/oauth_server/pkg/response"
+	"github.com/sing3demons/oauth_server/pkg/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -40,16 +42,17 @@ type ResponseMessageError struct {
 	Message string `json:"error"`
 }
 
-func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (*ResponseMessageError, *pkgErrors.Error) {
+func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (response.MessageError, *pkgErrors.Error) {
 	responseError := &ResponseMessageError{}
+
 	responseType := query.Get("response_type")
 	if responseType != "code" {
 		// http.Error(w, "Unsupported response_type. Expected 'code'", http.StatusBadRequest)
 		responseError.Message = "unsupported_response_type"
-		return responseError, &pkgErrors.Error{
+		return response.UnsupportedResponseType, &pkgErrors.Error{
 			Err:           fmt.Errorf("unsupported response_type: %s", responseType),
 			Message:       fmt.Sprintf("Unsupported response_type: %s. Expected 'code'", responseType),
-			AppResultCode: "40000",
+			AppResultCode: response.UnsupportedResponseType.ResultCode(),
 		}
 	}
 
@@ -59,10 +62,10 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	client, err := h.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
 		responseError.Message = "invalid_client"
-		return responseError, &pkgErrors.Error{
+		return response.InvalidClient, &pkgErrors.Error{
 			Err:           fmt.Errorf("client not found: %s", clientID),
 			Message:       "Invalid client_id",
-			AppResultCode: "40000",
+			AppResultCode: response.InvalidClient.ResultCode(),
 		}
 	}
 
@@ -75,10 +78,10 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	}
 	if !validURI {
 		responseError.Message = "invalid_redirect_uri"
-		return responseError, &pkgErrors.Error{
+		return response.InvalidGrant, &pkgErrors.Error{
 			Err:           fmt.Errorf("redirect_uri not registered: %s", redirectURI),
 			Message:       "redirect_uri is not registered for this client",
-			AppResultCode: "40000",
+			AppResultCode: response.InvalidGrant.ResultCode(),
 		}
 	}
 
@@ -96,13 +99,13 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	if err := h.transactionCache.SetTransaction(ctx, tid, tx, 15*time.Minute); err != nil {
 		// http.Error(w, "Server Error", http.StatusInternalServerError)
 		responseError.Message = "system_error"
-		return responseError, &pkgErrors.Error{
+		return response.SystemError, &pkgErrors.Error{
 			Err:           err,
 			Message:       "Failed to set transaction",
-			AppResultCode: "50000",
+			AppResultCode: response.SystemError.ResultCode(),
 		}
 	}
-	return nil, nil
+	return response.Success, nil
 }
 
 func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
@@ -127,7 +130,7 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 	if queryTid == "" {
 		body, err := h.insertTransaction(ctx, query, tid)
 		if err != nil {
-			ctx.JsonError(err, body)
+			ctx.JsonError(err, body.Error())
 			return
 		}
 	} else {
@@ -137,14 +140,14 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 			if errors.Is(err, pkgErrors.ErrNotFound) {
 				body, err := h.insertTransaction(ctx, query, tid)
 				if err != nil {
-					ctx.JsonError(err, body)
+					ctx.JsonError(err, body.Error())
 					return
 				}
 			} else {
 				ctx.JsonError(&pkgErrors.Error{
 					Err:           err,
 					Message:       "Session or Transaction expired. Please return to your app and try again.",
-					AppResultCode: "40000",
+					AppResultCode: response.InvalidGrant.ResultCode(),
 				},
 					map[string]string{"error": "transaction_expired"})
 				return
@@ -179,18 +182,11 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	ctx.Log("login", logger.MaskingOption{
 		MaskingField: "body.password",
 		MaskingType:  logger.MaskCustom,
-		Callback: func(s string) string {
-			return "**********"
-		},
+		Callback:     utils.MaskPassword,
 	}, logger.MaskingOption{
 		MaskingField: "body.username",
 		MaskingType:  logger.MaskCustom,
-		Callback: func(s string) string {
-			if len(s) <= 3 {
-				return s
-			}
-			return s[:3] + strings.Repeat("*", len(s)-4) + s[len(s)-1:]
-		},
+		Callback:     utils.MaskUsernameOrEmail,
 	})
 
 	sid := ctx.Req.URL.Query().Get("sid")
@@ -201,8 +197,8 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("missing session or transaction ID"),
 			Message:       "Missing session or transaction ID",
-			AppResultCode: "40000",
-		}, map[string]string{"error": "missing_session_or_transaction_id"})
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
@@ -245,7 +241,22 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 }
 
 func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
-	ctx.Log("register")
+	maskRegister := []logger.MaskingOption{
+		{
+			MaskingField: "body.password",
+			MaskingType:  logger.MaskCustom,
+			Callback:     utils.MaskPassword,
+		}, {
+			MaskingField: "body.username",
+			MaskingType:  logger.MaskCustom,
+			Callback:     utils.MaskUsername,
+		}, {
+			MaskingField: "body.email",
+			MaskingType:  logger.MaskCustom,
+			Callback:     utils.MaskEmail,
+		},
+	}
+	ctx.Log("register", maskRegister...)
 
 	sid := ctx.Req.URL.Query().Get("sid")
 	tid := ctx.Req.URL.Query().Get("tid")
@@ -255,8 +266,8 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("missing session or transaction ID"),
 			Message:       "Missing session or transaction ID",
-			AppResultCode: "40000",
-		}, map[string]string{"error": "missing_session_or_transaction_id"})
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 
 		return
 	}
@@ -271,7 +282,7 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 			Err:           fmt.Errorf("missing required fields"),
 			Message:       "Missing required fields",
 			AppResultCode: "40000",
-		}, ResponseMessageError{Message: "missing_or_invalid_parameters"})
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
@@ -279,8 +290,8 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("password too short"),
 			Message:       "Password must be at least 6 characters",
-			AppResultCode: "40000",
-		}, ResponseMessageError{Message: "missing_or_invalid_parameters"})
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
@@ -288,8 +299,8 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("invalid email format"),
 			Message:       "Invalid email format",
-			AppResultCode: "40000",
-		}, ResponseMessageError{Message: "missing_or_invalid_parameters"})
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
@@ -348,8 +359,8 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Transaction expired"),
 			Message:       "Transaction expired",
-			AppResultCode: "40000",
-		}, map[string]string{"error": "transaction_expired"})
+			AppResultCode: response.InvalidRequest.ResultCode(),
+		}, response.InvalidRequest.Error())
 		return
 	}
 
@@ -359,8 +370,8 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Failed to authorize: %s", err.Error()),
 			Message:       "Failed to authorize",
-			AppResultCode: "50000",
-		}, map[string]string{"error": "failed_to_authorize"})
+			AppResultCode: response.ServerError.ResultCode(),
+		}, response.ServerError.Error())
 		return
 	}
 
@@ -381,8 +392,8 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Invalid redirect_uri"),
 			Message:       "Invalid redirect_uri",
-			AppResultCode: "40002",
-		}, map[string]string{"error": "invalid_redirect_uri"})
+			AppResultCode: response.InvalidGrant.ResultCode(),
+		}, response.InvalidGrant.Error())
 		return
 	}
 
@@ -404,8 +415,8 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Missing session or transaction"),
 			Message:       "Missing session or transaction",
-			AppResultCode: "40000",
-		}, map[string]string{"error": "missing_session_or_transaction"})
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
@@ -420,8 +431,8 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Transaction expired"),
 			Message:       "Transaction expired",
-			AppResultCode: "40001",
-		}, map[string]string{"error": "transaction_expired"})
+			AppResultCode: response.InvalidRequest.ResultCode(),
+		}, response.InvalidRequest.Error())
 		return
 	}
 
@@ -430,17 +441,19 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Invalid Client"),
 			Message:       "Invalid Client",
-			AppResultCode: "40002",
-		}, map[string]string{"error": "invalid_client"})
+			AppResultCode: response.InvalidClient.ResultCode(),
+		}, response.InvalidClient.Error())
 		return
 	}
 
-	data := struct {
+	type ConsentPageData struct {
 		SID        string
 		TID        string
 		ClientName string
 		Scopes     []string
-	}{
+	}
+
+	data := ConsentPageData{
 		SID:        sid,
 		TID:        tid,
 		ClientName: client.ClientName,
@@ -462,8 +475,8 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Missing session or transaction ID"),
 			Message:       "Missing session or transaction ID",
-			AppResultCode: "40000",
-		}, map[string]string{"error": "missing_session_or_transaction_id"})
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
@@ -478,8 +491,8 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Transaction expired"),
 			Message:       "Transaction expired",
-			AppResultCode: "40001",
-		}, map[string]string{"error": "transaction_expired"})
+			AppResultCode: response.InvalidRequest.ResultCode(),
+		}, response.InvalidRequest.Error())
 		return
 	}
 
@@ -492,8 +505,8 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 			ctx.JsonError(&pkgErrors.Error{
 				Err:           fmt.Errorf("access denied by user"),
 				Message:       "Access denied by user",
-				AppResultCode: "40101",
-			}, map[string]string{"error": "access_denied"})
+				AppResultCode: response.AccessDenied.ResultCode(),
+			}, response.AccessDenied.Error())
 			return
 		}
 
@@ -553,17 +566,17 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 		}
 	}
 
-	var response map[string]interface{}
+	var resp map[string]interface{}
 	var err error
 
 	switch grantType {
 	case "authorization_code":
 		redirectURI := ctx.Req.FormValue("redirect_uri")
 		codeVerifier := ctx.Req.FormValue("code_verifier")
-		response, err = h.oauthService.ExchangeToken(ctx, code, clientID, clientSecret, redirectURI, codeVerifier)
+		resp, err = h.oauthService.ExchangeToken(ctx, code, clientID, clientSecret, redirectURI, codeVerifier)
 	case "refresh_token":
 		refreshToken := ctx.Req.FormValue("refresh_token")
-		response, err = h.oauthService.RefreshToken(ctx, refreshToken, clientID, clientSecret)
+		resp, err = h.oauthService.RefreshToken(ctx, refreshToken, clientID, clientSecret)
 	}
 
 	if err != nil {
@@ -573,12 +586,12 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           err,
 			Message:       "Failed to exchange token: " + err.Error(),
-			AppResultCode: "40001",
-		}, ResponseMessageError{Message: "invalid_request"})
+			AppResultCode: response.InvalidRequest.ResultCode(),
+		}, response.InvalidRequest.Error())
 		return
 	}
 
-	ctx.Json(http.StatusOK, response)
+	ctx.Json(http.StatusOK, resp)
 }
 
 // UserInfo (GET /userinfo) เปิดรับให้ Web/Mobile ตรวจข้อมูลส่วนตัว
@@ -716,8 +729,8 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("missing token or client ID"),
 			Message:       "Missing token or client ID",
-			AppResultCode: "40000",
-		}, map[string]string{"error": "missing_token_or_client"})
+			AppResultCode: response.InvalidRequest.ResultCode(),
+		}, response.InvalidRequest.Error())
 		return
 	}
 
@@ -726,8 +739,8 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           err,
 			Message:       "Failed to revoke token",
-			AppResultCode: "40001",
-		}, map[string]string{"error": "invalid_request"})
+			AppResultCode: response.InvalidRequest.ResultCode(),
+		}, response.InvalidRequest.Error())
 		return
 	}
 
