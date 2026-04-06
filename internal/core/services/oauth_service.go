@@ -448,19 +448,32 @@ func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSe
 		return nil, errors.New("unauthorized_client: client_credentials not allowed for this client")
 	}
 
-	// 5. Scope Validation — กรองเฉพาะที่ Client อนุญาต
+	// 5. Scope Validation — กรองตาม server -> client สองชั้น
+	// server-level: เฉพาะ scope ที่ server รองรับ
+	serverScopesSet := make(map[string]bool, len(s.cfg.Oidc.SupportedScopes))
+	for _, sc := range s.cfg.Oidc.SupportedScopes {
+		serverScopesSet[sc] = true
+	}
+	// client-level: กรองจาก client.AllowedScopes
 	allowedMap := make(map[string]bool, len(client.AllowedScopes))
-	for _, s := range client.AllowedScopes {
-		allowedMap[s] = true
+	for _, sc := range client.AllowedScopes {
+		if serverScopesSet[sc] {
+			allowedMap[sc] = true
+		}
 	}
 	var finalScopes []string
-	for _, s := range scopes {
-		if allowedMap[s] {
-			finalScopes = append(finalScopes, s)
+	for _, sc := range scopes {
+		if serverScopesSet[sc] && allowedMap[sc] {
+			finalScopes = append(finalScopes, sc)
 		}
 	}
 	if len(finalScopes) == 0 {
-		finalScopes = client.AllowedScopes // fallback ใช้ทุก scope ที่ Client มี
+		// fallback: ใช้ทุก scope ที่ client มี และ server รองรับ
+		for _, sc := range client.AllowedScopes {
+			if serverScopesSet[sc] {
+				finalScopes = append(finalScopes, sc)
+			}
+		}
 	}
 
 	// 6. ดึง Signing Key
@@ -665,29 +678,38 @@ func (s *OAuthService) TokenExchange(
 		}
 	}
 
-	// 4. Downscope / Intersection logic
-	allowedMap := make(map[string]bool, len(client.AllowedScopes))
-	for _, s := range client.AllowedScopes {
-		allowedMap[s] = true
+	// 4. Downscope / Intersection logic (server -> client -> original token)
+	// server-level
+	serverScopesSet := make(map[string]bool, len(s.cfg.Oidc.SupportedScopes))
+	for _, sc := range s.cfg.Oidc.SupportedScopes {
+		serverScopesSet[sc] = true
 	}
+	// client-level
+	allowedMap := make(map[string]bool, len(client.AllowedScopes))
+	for _, sc := range client.AllowedScopes {
+		if serverScopesSet[sc] {
+			allowedMap[sc] = true
+		}
+	}
+	// original token scopes
 	grantedMap := make(map[string]bool, len(grantedScopes))
-	for _, s := range grantedScopes {
-		grantedMap[s] = true
+	for _, sc := range grantedScopes {
+		grantedMap[sc] = true
 	}
 
 	var finalScopes []string
 	if len(requestedScopes) > 0 {
-		// requested has to exist in BOTH original token AND client allowed scopes
-		for _, s := range requestedScopes {
-			if allowedMap[s] && grantedMap[s] {
-				finalScopes = append(finalScopes, s)
+		// requested must exist in server + client + original token
+		for _, sc := range requestedScopes {
+			if serverScopesSet[sc] && allowedMap[sc] && grantedMap[sc] {
+				finalScopes = append(finalScopes, sc)
 			}
 		}
 	} else {
-		// default to intersection of original and client allowed
-		for s := range grantedMap {
-			if allowedMap[s] {
-				finalScopes = append(finalScopes, s)
+		// default: intersection of original token ∩ client allowed ∩ server
+		for sc := range grantedMap {
+			if allowedMap[sc] {
+				finalScopes = append(finalScopes, sc)
 			}
 		}
 	}

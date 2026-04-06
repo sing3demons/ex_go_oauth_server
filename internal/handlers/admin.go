@@ -144,17 +144,19 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 	// }
 
 	data := struct {
-		Clients         []*models.Client
-		ScopesSupported []string
-		GrantTypes      []string
+		Clients              []*models.Client
+		ScopesSupported     []string
+		GrantTypes          []string
+		SigningAlgs         []string
+		SubjectTypes        []string
 	}{
 		Clients:         clients,
 		ScopesSupported: h.cfg.GetArray("oidc.scopes_supported"),
 		GrantTypes:      h.cfg.GetArray("oidc.grant_types_supported"),
+		SigningAlgs:     h.cfg.GetArray("oidc.id_token_signing_alg_values_supported"),
+		SubjectTypes:    h.cfg.GetArray("oidc.subject_types_supported"),
 	}
 
-	// w.Header().Set("Content-Type", "text/html")
-	// tmpl.Execute(w, data)
 	ctx.RenderTemplate("templates/admin_dashboard.html", data)
 }
 
@@ -236,13 +238,33 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 	}
 
 	idTokenAlg := ctx.Req.FormValue("id_token_signed_response_alg")
-	if idTokenAlg == "" {
-		idTokenAlg = "RS256"
+	supportedAlgs := h.cfg.GetArray("oidc.id_token_signing_alg_values_supported")
+	algValid := false
+	for _, a := range supportedAlgs {
+		if a == idTokenAlg {
+			algValid = true
+			break
+		}
+	}
+	if !algValid {
+		if len(supportedAlgs) > 0 {
+			idTokenAlg = supportedAlgs[0] // default to first supported
+		} else {
+			idTokenAlg = "RS256"
+		}
 	}
 
 	subjectType := ctx.Req.FormValue("subject_type")
-	if subjectType != "public" && subjectType != "pairwise" {
-		subjectType = "public"
+	supportedSubjectTypes := h.cfg.GetArray("oidc.subject_types_supported")
+	stValid := false
+	for _, st := range supportedSubjectTypes {
+		if st == subjectType {
+			stValid = true
+			break
+		}
+	}
+	if !stValid {
+		subjectType = "public" // default
 	}
 
 	clientID := uuid.New().String()

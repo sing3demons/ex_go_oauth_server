@@ -84,9 +84,9 @@
                 <div class="form-group" style="margin-top: 15px;">
                     <label for="id_token_signed_response_alg">ID Token Signing Algorithm</label>
                     <select id="id_token_signed_response_alg" name="id_token_signed_response_alg" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 14px; appearance: none; background-color: #fff; cursor: pointer;">
-                        <option value="RS256" selected>RS256 (RSA Signature with SHA-256)</option>
-                        <option value="ES256">ES256 (ECDSA using P-256 and SHA-256)</option>
-                        <option value="EdDSA">EdDSA (Edwards-curve Digital Signature Algorithm)</option>
+                        {{range $i, $alg := .SigningAlgs}}
+                        <option value="{{$alg}}" {{if eq $i 0}}selected{{end}}>{{$alg}}</option>
+                        {{end}}
                     </select>
                 </div>
 
@@ -101,12 +101,11 @@
                 <div class="form-group" style="margin-top: 15px;">
                     <label>Subject Type</label>
                     <div class="checkbox-group">
+                        {{range $i, $st := .SubjectTypes}}
                         <label class="checkbox-item">
-                            <input type="radio" name="subject_type" value="public" checked> public (same <code>sub</code> for all clients)
+                            <input type="radio" name="subject_type" value="{{$st}}" {{if eq $i 0}}checked{{end}}> {{$st}}
                         </label>
-                        <label class="checkbox-item">
-                            <input type="radio" name="subject_type" value="pairwise"> pairwise (unique <code>sub</code> per client, hides identity)
-                        </label>
+                        {{end}}
                     </div>
                 </div>
 
