@@ -1,4 +1,6 @@
 @uri=http://localhost:8080
+@clientId=client_id
+@clientSecret=client_secret
 
 ### health
 GET {{uri}}/health
@@ -8,3 +10,13 @@ GET {{uri}}/.well-known/openid-configuration
 
 ###
 GET {{uri}}/jwks.json
+
+###
+# curl -X POST http://localhost:8080/token \
+#   -u "client_id:client_secret" \
+#   -d "grant_type=client_credentials&scope=openid profile"
+POST {{uri}}/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic {{base64(clientId + ':' + clientSecret)}}
+
+grant_type=client_credentials&scope=openid profile

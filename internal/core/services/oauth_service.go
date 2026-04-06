@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -377,6 +378,88 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 	}
 
 	return response, nil
+}
+
+// ClientCredentials handles the client_credentials grant type (M2M flows).
+// ไม่ต้องการ User — Client ยืนยันตัวเองด้วย client_id + client_secret
+func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSecret string, scopes []string) (map[string]interface{}, error) {
+	// 1. ค้นหาและยืนยัน Client
+	client, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		return nil, errors.New("invalid_client")
+	}
+
+	// 2. Client ต้องเป็น confidential เท่านั้น (public client ไม่มี secret)
+	if client.ClientType != "confidential" {
+		return nil, errors.New("unauthorized_client: client_credentials requires a confidential client")
+	}
+
+	// 3. ตรวจสอบ Client Secret
+	if clientSecret == "" {
+		return nil, errors.New("invalid_client: client_secret is required")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(client.ClientSecretHash), []byte(clientSecret)); err != nil {
+		return nil, errors.New("invalid_client: secret mismatch")
+	}
+
+	// 4. ตรวจสอบว่า Client รองรับ grant_type นี้
+	hasGrant := false
+	for _, g := range client.GrantTypes {
+		if g == "client_credentials" {
+			hasGrant = true
+			break
+		}
+	}
+	if !hasGrant {
+		return nil, errors.New("unauthorized_client: client_credentials not allowed for this client")
+	}
+
+	// 5. Scope Validation — กรองเฉพาะที่ Client อนุญาต
+	allowedMap := make(map[string]bool, len(client.AllowedScopes))
+	for _, s := range client.AllowedScopes {
+		allowedMap[s] = true
+	}
+	var finalScopes []string
+	for _, s := range scopes {
+		if allowedMap[s] {
+			finalScopes = append(finalScopes, s)
+		}
+	}
+	if len(finalScopes) == 0 {
+		finalScopes = client.AllowedScopes // fallback ใช้ทุก scope ที่ Client มี
+	}
+
+	// 6. ดึง Signing Key
+	keyMgr, err := s.keyService.GetActiveKeyManager(ctx)
+	if err != nil {
+		return nil, errors.New("internal_server_error_keys")
+	}
+
+	// 7. สร้าง Access Token (ไม่มี sub เพราะไม่มี User)
+	now := time.Now()
+	atClaims := jwt.MapClaims{
+		"iss":    s.cfg.Issuer,
+		"sub":    clientID, // M2M: sub = client_id
+		"aud":    clientID,
+		"exp":    now.Add(1 * time.Hour).Unix(),
+		"iat":    now.Unix(),
+		"scopes": finalScopes,
+		"client_credentials": true, // บอก downstream ว่า flow นี้ไม่ใช่ user
+	}
+	atToken := jwt.NewWithClaims(jwt.SigningMethodRS256, atClaims)
+	atToken.Header["kid"] = keyMgr.KeyID
+
+	accessToken, err := atToken.SignedString(keyMgr.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"access_token": accessToken,
+		"token_type":   "Bearer",
+		"expires_in":   3600,
+		"scope":        strings.Join(finalScopes, " "),
+	}, nil
 }
 
 // ValidateAccessToken parses and verifies an access token.

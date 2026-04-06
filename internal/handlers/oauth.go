@@ -573,13 +573,13 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	}
 
 	grantType := ctx.Req.FormValue("grant_type")
-	if grantType != "authorization_code" && grantType != "refresh_token" {
+	if grantType != "authorization_code" && grantType != "refresh_token" && grantType != "client_credentials" {
 		ctx.Log("token")
 		ctx.JsonError(&pkgErrors.Error{
 			Err:           fmt.Errorf("Unsupported grant type: %s", grantType),
 			Message:       "Unsupported grant type",
-			AppResultCode: "40003",
-		}, map[string]string{"error": "unsupported_grant_type"})
+			AppResultCode: response.UnsupportedResponseType.ResultCode(),
+		}, response.UnsupportedResponseType.Error())
 		return
 	}
 
@@ -611,6 +611,9 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	case "refresh_token":
 		refreshToken := ctx.Req.FormValue("refresh_token")
 		resp, err = h.oauthService.RefreshToken(ctx, refreshToken, clientID, clientSecret)
+	case "client_credentials":
+		scopes := strings.Fields(ctx.Req.FormValue("scope"))
+		resp, err = h.oauthService.ClientCredentials(ctx, clientID, clientSecret, scopes)
 	}
 
 	if err != nil {

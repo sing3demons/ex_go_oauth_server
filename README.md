@@ -126,7 +126,7 @@ sequenceDiagram
 | `GET` | `/authorize` | จุดเริ่มต้นของ Authorization Code Flow รองรับพารามิเตอร์ PKCE |
 | `POST` | `/login` / `/register` | ส่งคำขอเข้าสู่ระบบหรือสมัครสมาชิกเพื่อแลกเปลี่ยน Transaction ID |
 | `GET/POST`| `/consent` | หน้าจอยินยอมสิทธิ์ (Consent Screen) รับรองการยิง Token กลับไปให้แพลตฟอร์มปลายทาง |
-| `POST` | `/token` | แลกเปลี่ยน Authorization Code ให้กลายเป็นชุด `access_token`, `id_token` (JWT) และ `refresh_token` |
+| `POST` | `/token` | แลกเปลี่ยน Code หรือ Credential เป็น Access Token รองรับ 3 Grant Types |
 | `GET` | `/userinfo` | ปกป้องโปรไฟล์ผู้ใช้งานด้วย Access Token เพื่อตอบกลับตามมาตรฐาน OIDC |
 
 ### 🛑 Session & Security
@@ -140,3 +140,92 @@ sequenceDiagram
 | Method | Endpoint | รายละเอียด |
 | :-: | --- | --- |
 | `GET` | `/admin/dashboard` | หน้าแสดงรายการและการสั่งสร้าง Client Application ใหม่ ปกป้องด้วย Basic Auth |
+| `POST` | `/admin/clients/ui` | สร้าง Client ผ่านหน้า Web UI (Form) |
+| `POST` | `/admin/clients` | สร้าง Client ผ่าน JSON API |
+| `POST` | `/admin/users` | สร้าง User ผ่าน JSON API |
+
+---
+
+## 🔑 Grant Types ที่รองรับ
+
+### 1. `authorization_code` — สำหรับ Web/Mobile App ที่มี User
+
+Flow มาตรฐาน OIDC ที่มี User เข้ามาเกี่ยวข้อง รองรับ **PKCE** สำหรับ Public Client (SPA/Mobile):
+
+```
+GET /authorize?response_type=code&client_id=...&redirect_uri=...&scope=openid profile&state=...&code_challenge=...
+  → หน้า Login → หน้า Consent → redirect กลับพร้อม ?code=...
+
+POST /token
+  grant_type=authorization_code
+  code=...
+  redirect_uri=...
+  code_verifier=...   (สำหรับ PKCE)
+  client_id + client_secret (สำหรับ Confidential Client)
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "...",
+  "id_token": "eyJ...",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+---
+
+### 2. `refresh_token` — ต่ออายุ Token โดยไม่ต้อง Login ใหม่
+
+```bash
+POST /token
+  grant_type=refresh_token
+  refresh_token=...
+  client_id=...
+  client_secret=...   (สำหรับ Confidential Client)
+```
+
+**Response:** เหมือนกับ `authorization_code` แต่ออก Access Token ชุดใหม่
+
+---
+
+### 3. `client_credentials` — สำหรับ Machine-to-Machine (M2M)
+
+ใช้เมื่อไม่มี User เข้ามาเกี่ยวข้อง เช่น Backend Service เรียก API อื่นโดยตรง:
+
+> ⚠️ **ต้องการ Confidential Client เท่านั้น** (ต้องมี `client_secret`)
+> ⚠️ **ต้อง tick `client_credentials`** ใน Grant Types ตอนสร้าง Client
+
+```bash
+# วิธีที่ 1: Basic Auth
+curl -X POST http://localhost:8080/token \
+  -u "client_id:client_secret" \
+  -d "grant_type=client_credentials&scope=openid profile"
+
+# วิธีที่ 2: Body
+curl -X POST http://localhost:8080/token \
+  -d "grant_type=client_credentials" \
+  -d "client_id=..." \
+  -d "client_secret=..." \
+  -d "scope=openid profile"
+```
+
+**Response:** (ไม่มี `refresh_token` และ `id_token`)
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "openid profile"
+}
+```
+
+**ความแตกต่างของ Access Token ที่ได้:**
+| Claim | authorization_code | client_credentials |
+|---|---|---|
+| `sub` | User ID | Client ID |
+| `client_credentials` | ไม่มี | `true` |
+| `refresh_token` | ✅ มี | ❌ ไม่มี |
+| `id_token` | ✅ มี (ถ้า scope openid) | ❌ ไม่มี |
