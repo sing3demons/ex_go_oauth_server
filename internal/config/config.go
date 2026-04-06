@@ -30,6 +30,7 @@ type Config struct {
 
 	Oidc           OIDC
 	TrustedIssuers []TrustedIssuer
+	PairwiseSalt   string
 
 	LoggerConfig LogConfig
 }
@@ -188,6 +189,7 @@ func LoadConfig() *Config {
 		KeyMaxRetentionCount: yamlCfg.App.KeyMaxRetentionCount,
 		AdminUsername:        getEnv("ADMIN_USERNAME", ""),
 		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
+		PairwiseSalt:         getEnv("PAIRWISE_SALT", "default-pairwise-salt-change-in-production"),
 		LoggerConfig:         yamlCfg.Log,
 		Oidc:                 yamlCfg.Oidc,
 		TrustedIssuers:       yamlCfg.TrustedIssuers,

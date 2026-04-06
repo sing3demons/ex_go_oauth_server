@@ -10,4 +10,5 @@ type Client struct {
 	AllowedScopes            []string `bson:"allowed_scopes" json:"allowed_scopes"`
 	RequirePKCE              bool     `bson:"require_pkce" json:"require_pkce"`
 	IDTokenSignedResponseAlg string   `bson:"id_token_signed_response_alg" json:"id_token_signed_response_alg"`
+	SubjectType              string   `bson:"subject_type" json:"subject_type"` // "public" or "pairwise"
 }

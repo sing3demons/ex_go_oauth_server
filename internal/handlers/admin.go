@@ -240,6 +240,11 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 		idTokenAlg = "RS256"
 	}
 
+	subjectType := ctx.Req.FormValue("subject_type")
+	if subjectType != "public" && subjectType != "pairwise" {
+		subjectType = "public"
+	}
+
 	clientID := uuid.New().String()
 	var plainSecret string
 	var secretHash string
@@ -263,9 +268,10 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 		ClientName:       clientName,
 		RedirectURIs:     redirectURIs,
 		GrantTypes:       grantTypes,
-		AllowedScopes:    scopes,
-		RequirePKCE:      requirePKCE,
+		AllowedScopes:            scopes,
+		RequirePKCE:              requirePKCE,
 		IDTokenSignedResponseAlg: idTokenAlg,
+		SubjectType:              subjectType,
 	}
 
 	if err := h.clientRepo.Create(ctx.Req.Context(), client); err != nil {

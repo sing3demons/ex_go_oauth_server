@@ -98,6 +98,18 @@
                     <span><strong>Require PKCE</strong> (Recommended)</span>
                 </div>
 
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>Subject Type</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item">
+                            <input type="radio" name="subject_type" value="public" checked> public (same <code>sub</code> for all clients)
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="radio" name="subject_type" value="pairwise"> pairwise (unique <code>sub</code> per client, hides identity)
+                        </label>
+                    </div>
+                </div>
+
                 <button type="submit">Create Client</button>
             </form>
         </div>
@@ -116,6 +128,7 @@
                         <th>Scopes</th>
                         <th>Grant Types</th>
                         <th>Alg</th>
+                        <th>Subject</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -154,6 +167,13 @@
                         </td>
                         <td>
                             <span class="badge badge-success">{{if .IDTokenSignedResponseAlg}}{{.IDTokenSignedResponseAlg}}{{else}}RS256{{end}}</span>
+                        </td>
+                        <td>
+                            {{if eq .SubjectType "pairwise"}}
+                                <span class="badge" style="background:#fd7e14;color:white;">pairwise</span>
+                            {{else}}
+                                <span class="badge" style="background:#6c757d;color:white;">public</span>
+                            {{end}}
                         </td>
                     </tr>
                     {{else}}

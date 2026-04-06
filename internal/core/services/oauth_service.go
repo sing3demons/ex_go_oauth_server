@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -180,7 +181,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	now := time.Now()
 	atClaims := jwt.MapClaims{
 		"iss":    s.cfg.Issuer,
-		"sub":    info.UserID,
+		"sub":    s.deriveSub(client, info.UserID),
 		"aud":    clientID,
 		"exp":    now.Add(1 * time.Hour).Unix(),
 		"iat":    now.Unix(),
@@ -235,7 +236,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	if hasOpenID {
 		idClaims := jwt.MapClaims{
 			"iss": s.cfg.Issuer,
-			"sub": info.UserID,
+			"sub": s.deriveSub(client, info.UserID),
 			"aud": clientID,
 			"exp": now.Add(1 * time.Hour).Unix(),
 			"iat": now.Unix(),
@@ -323,7 +324,7 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 	now := time.Now()
 	atClaims := jwt.MapClaims{
 		"iss":    s.cfg.Issuer,
-		"sub":    rt.UserID,
+		"sub":    s.deriveSub(client, rt.UserID),
 		"aud":    clientID,
 		"exp":    now.Add(1 * time.Hour).Unix(),
 		"iat":    now.Unix(),
@@ -367,7 +368,7 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 	if hasOpenID {
 		idClaims := jwt.MapClaims{
 			"iss": s.cfg.Issuer,
-			"sub": rt.UserID,
+			"sub": s.deriveSub(client, rt.UserID),
 			"aud": clientID,
 			"exp": now.Add(1 * time.Hour).Unix(),
 			"iat": now.Unix(),
@@ -731,4 +732,16 @@ func (s *OAuthService) getSigningMethod(alg string) jwt.SigningMethod {
 	default:
 		return jwt.SigningMethodRS256
 	}
+}
+
+// deriveSub returns pairwise or public subject identifier based on client config.
+// Pairwise: HMAC-SHA256(salt, clientID+"|"+userID) → base64url
+// Public:   raw userID
+func (s *OAuthService) deriveSub(client *models.Client, userID string) string {
+	if client == nil || client.SubjectType != "pairwise" {
+		return userID
+	}
+	mac := hmac.New(sha256.New, []byte(s.cfg.PairwiseSalt))
+	mac.Write([]byte(client.ClientID + "|" + userID))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
