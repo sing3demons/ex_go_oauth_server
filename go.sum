@@ -1,3 +1,5 @@
+github.com/LumenResearch/uasurfer v0.0.0-20260126094926-dace53404a8d h1:9i/cEq712Ep4enz06tBtiNnclbtyBwN6GcWomLzoqpA=
+github.com/LumenResearch/uasurfer v0.0.0-20260126094926-dace53404a8d/go.mod h1:Rn8VHlIvl5AgS2VrIpcMM5CAZWtKuRxCjiD3COhyIDE=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=

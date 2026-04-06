@@ -8,6 +8,7 @@ import (
 
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/pkg/logger"
+	"github.com/sing3demons/oauth_server/pkg/utils"
 
 	"github.com/mssola/user_agent"
 )
@@ -93,7 +94,7 @@ func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *
 			SessionId:        sessionID,
 			TransactionId:    transactionID,
 			Channel:          "none",
-			Agent:            parseUA(r.UserAgent()),
+			Agent:            utils.ParseUA(r.UserAgent()),
 			RecordType:       "detail",
 		}
 
