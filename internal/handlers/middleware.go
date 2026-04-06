@@ -3,12 +3,14 @@ package handlers
 import (
 	"crypto/subtle"
 	"net/http"
+
+	"github.com/sing3demons/oauth_server/pkg/kp"
 )
 
 // BasicAuthMiddleware ปกป้อง Endpoint ด้วย HTTP Basic Authentication
-func BasicAuthMiddleware(expectedUsername, expectedPassword string) func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
+func BasicAuthMiddleware(expectedUsername, expectedPassword string) kp.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			username, password, ok := r.BasicAuth()
 
 			if !ok {
@@ -27,6 +29,6 @@ func BasicAuthMiddleware(expectedUsername, expectedPassword string) func(http.Ha
 				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			}
-		}
+		})
 	}
 }

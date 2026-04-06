@@ -3,25 +3,29 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
-	"html/template"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
+	"github.com/sing3demons/oauth_server/pkg/errors"
+	"github.com/sing3demons/oauth_server/pkg/kp"
+	"github.com/sing3demons/oauth_server/pkg/response"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AdminHandler struct {
+	cfg        *config.Config
 	userRepo   ports.UserRepository
 	clientRepo ports.ClientRepository
 }
 
-func NewAdminHandler(userRepo ports.UserRepository, clientRepo ports.ClientRepository) *AdminHandler {
+func NewAdminHandler(cfg *config.Config, userRepo ports.UserRepository, clientRepo ports.ClientRepository) *AdminHandler {
 	return &AdminHandler{
+		cfg:        cfg,
 		userRepo:   userRepo,
 		clientRepo: clientRepo,
 	}
@@ -33,16 +37,27 @@ type CreateUserRequest struct {
 	Email    string `json:"email"`
 }
 
-func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
+	ctx.Log("create_user")
 	var req CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid input JSON", http.StatusBadRequest)
+
+	if err := ctx.Bind(&req); err != nil {
+		// http.Error(w, "Invalid input JSON", http.StatusBadRequest)
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Invalid input JSON",
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Failed to hash password",
+			AppResultCode: response.ServerError.ResultCode(),
+		}, response.ServerError.Error())
 		return
 	}
 
@@ -54,14 +69,16 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 	}
 
-	if err := h.userRepo.Create(r.Context(), user); err != nil {
-		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+	if err := h.userRepo.Create(ctx, user); err != nil {
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Failed to create user",
+			AppResultCode: response.ServerError.ResultCode(),
+		}, response.ServerError.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"message": "User created successfully", "id": user.ID})
+	ctx.Json(http.StatusCreated, map[string]string{"message": "User created successfully", "id": user.ID})
 }
 
 type CreateClientRequest struct {
@@ -70,10 +87,15 @@ type CreateClientRequest struct {
 	AllowedScopes []string `json:"allowed_scopes"`
 }
 
-func (h *AdminHandler) CreateClient(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandler) CreateClient(ctx *kp.Ctx) {
+	ctx.Log("create_client")
 	var req CreateClientRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid input JSON", http.StatusBadRequest)
+	if err := ctx.Bind(&req); err != nil {
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Invalid input JSON",
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
@@ -87,14 +109,16 @@ func (h *AdminHandler) CreateClient(w http.ResponseWriter, r *http.Request) {
 		AllowedScopes: req.AllowedScopes,
 	}
 
-	if err := h.clientRepo.Create(r.Context(), client); err != nil {
-		http.Error(w, "Failed to create client", http.StatusInternalServerError)
+	if err := h.clientRepo.Create(ctx, client); err != nil {
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Failed to create client",
+			AppResultCode: response.ServerError.ResultCode(),
+		}, response.ServerError.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	ctx.Json(http.StatusCreated, map[string]interface{}{
 		"message":   "Client created successfully",
 		"client_id": client.ClientID,
 	})
@@ -104,53 +128,90 @@ func (h *AdminHandler) CreateClient(w http.ResponseWriter, r *http.Request) {
 // Admin UI Handlers
 // -----------------------------------------------------
 
-func (h *AdminHandler) DashboardUI(w http.ResponseWriter, r *http.Request) {
-	clients, err := h.clientRepo.FindAll(r.Context())
+func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
+	ctx.Log("admin_dashboard")
+	clients, err := h.clientRepo.FindAll(ctx)
 	if err != nil {
-		http.Error(w, "Failed to fetch clients", http.StatusInternalServerError)
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Failed to fetch clients",
+			AppResultCode: response.ServerError.ResultCode(),
+		}, response.ServerError.Error())
 		return
 	}
 
-	tmpl, err := template.ParseFiles("templates/admin_dashboard.html")
-	if err != nil {
-		http.Error(w, "Failed to load template", http.StatusInternalServerError)
-		return
-	}
+	// tmpl, err := template.ParseFiles("templates/admin_dashboard.html")
+	// if err != nil {
+	// 	ctx.JsonError(&errors.Error{
+	// 		Err:           err,
+	// 		Message:       "Failed to load template",
+	// 		AppResultCode: response.ServerError.ResultCode(),
+	// 	}, response.ServerError.Error())
+	// 	return
+	// }
 
 	data := struct {
-		Clients []*models.Client
+		Clients         []*models.Client
+		ScopesSupported []string
+		GrantTypes      []string
 	}{
-		Clients: clients,
+		Clients:         clients,
+		ScopesSupported: h.cfg.GetArray("oidc.scopes_supported"),
+		GrantTypes:      h.cfg.GetArray("oidc.grant_types_supported"),
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	tmpl.Execute(w, data)
+	// w.Header().Set("Content-Type", "text/html")
+	// tmpl.Execute(w, data)
+	ctx.RenderTemplate("templates/admin_dashboard.html", data)
 }
 
-func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
+	ctx.Log("create_client_ui")
+	if err := ctx.Req.ParseForm(); err != nil {
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Invalid form submission",
+			AppResultCode: response.MissingOrInvalidParameter.ResultCode(),
+		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
-	clientName := r.FormValue("client_name")
-	redirectURIsRaw := r.FormValue("redirect_uris")
-	requirePKCE := r.FormValue("require_pkce") == "true"
+	clientName := ctx.Req.FormValue("client_name")
+	redirectURIsRaw := ctx.Req.FormValue("redirect_uris")
+	requirePKCE := ctx.Req.FormValue("require_pkce") == "true"
 
 	// รับ Checkbox ที่ชื่อเดียวกันมาเป็น slice ของ string
-	r.ParseForm() // already parsed actually, but let's be safe
-	scopes := r.Form["scopes"]
-	if len(scopes) == 0 {
-		scopes = []string{}
+	ctx.Req.ParseForm() // already parsed actually, but let's be safe
+
+	// validate scopes กับค่าใน config
+	allowedScopes := make(map[string]bool)
+	for _, s := range h.cfg.GetArray("oidc.scopes_supported") {
+		allowedScopes[s] = true
 	}
-	
-	// รับ grant_types จาก Form (checkbox)
-	// Grant types ที่รองรับ: "authorization_code", "refresh_token"
-	allowedGrantTypes := map[string]bool{
-		"authorization_code": true,
-		"refresh_token":      true,
+	var scopes []string
+	for _, s := range ctx.Req.Form["scopes"] {
+		if allowedScopes[s] {
+			scopes = append(scopes, s)
+		}
 	}
-	grantTypes := r.Form["grant_types"]
+	// openid บังคับเสมอ
+	hasOpenID := false
+	for _, s := range scopes {
+		if s == "openid" {
+			hasOpenID = true
+			break
+		}
+	}
+	if !hasOpenID {
+		scopes = append([]string{"openid"}, scopes...)
+	}
+
+	// รับ grant_types จาก Form (checkbox) และ validate กับค่าใน config
+	allowedGrantTypes := make(map[string]bool)
+	for _, gt := range h.cfg.GetArray("oidc.grant_types_supported") {
+		allowedGrantTypes[gt] = true
+	}
+	grantTypes := ctx.Req.Form["grant_types"]
 	if len(grantTypes) == 0 {
 		// Default: authorization_code เสมอ
 		grantTypes = []string{"authorization_code"}
@@ -177,7 +238,7 @@ func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	clientType := r.FormValue("client_type")
+	clientType := ctx.Req.FormValue("client_type")
 	if clientType == "" {
 		clientType = "public"
 	}
@@ -209,17 +270,26 @@ func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
 		RequirePKCE:      requirePKCE,
 	}
 
-	if err := h.clientRepo.Create(r.Context(), client); err != nil {
-		http.Error(w, "Failed to create client", http.StatusInternalServerError)
+	if err := h.clientRepo.Create(ctx.Req.Context(), client); err != nil {
+		ctx.JsonError(&errors.Error{
+			Err:           err,
+			Message:       "Failed to create client",
+			AppResultCode: response.ServerError.ResultCode(),
+		}, response.ServerError.Error())
 		return
 	}
 
 	if clientType == "confidential" {
-		tmpl, err := template.ParseFiles("templates/client_success.html")
-		if err != nil {
-			http.Error(w, "Failed to load success template", http.StatusInternalServerError)
-			return
-		}
+		// tmpl, err := template.ParseFiles("templates/client_success.html")
+		// if err != nil {
+		// 	// http.Error(w, "Failed to load success template", http.StatusInternalServerError)
+		// 	ctx.JsonError(&errors.Error{
+		// 		Err:           err,
+		// 		Message:       "Failed to load success template",
+		// 		AppResultCode: response.ServerError.ResultCode(),
+		// 	}, response.ServerError.Error())
+		// 	return
+		// }
 		data := struct {
 			ClientID     string
 			ClientName   string
@@ -231,10 +301,11 @@ func (h *AdminHandler) CreateClientUI(w http.ResponseWriter, r *http.Request) {
 			ClientType:   clientType,
 			ClientSecret: plainSecret,
 		}
-		w.Header().Set("Content-Type", "text/html")
-		tmpl.Execute(w, data)
+		// w.Header().Set("Content-Type", "text/html")
+		// tmpl.Execute(w, data)
+		ctx.RenderTemplate("templates/client_success.html", data)
 		return
 	}
 
-	http.Redirect(w, r, "/admin/dashboard", http.StatusFound)
+	ctx.Redirect("/admin/dashboard", http.StatusFound)
 }

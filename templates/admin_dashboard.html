@@ -65,17 +65,20 @@
 
                 <label>Allowed Scopes</label>
                 <div class="checkbox-group">
-                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="openid" checked> openid</label>
-                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="profile" checked> profile</label>
-                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="email" checked> email</label>
-                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="read:posts"> read:posts</label>
-                    <label class="checkbox-item"><input type="checkbox" name="scopes" value="write:data"> write:data</label>
+                    {{range .ScopesSupported}}
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="scopes" value="{{.}}" {{if eq . "openid"}}checked{{end}}> {{.}}
+                    </label>
+                    {{end}}
                 </div>
 
                 <label>Grant Types</label>
                 <div class="checkbox-group">
-                    <label class="checkbox-item"><input type="checkbox" name="grant_types" value="authorization_code" checked> authorization_code</label>
-                    <label class="checkbox-item"><input type="checkbox" name="grant_types" value="refresh_token"> refresh_token</label>
+                    {{range .GrantTypes}}
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="grant_types" value="{{.}}" {{if eq . "authorization_code"}}checked{{end}}> {{.}}
+                    </label>
+                    {{end}}
                 </div>
 
                 <div class="switch-wrapper">

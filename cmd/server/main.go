@@ -77,15 +77,16 @@ func main() {
 	app.POST("/revoke", oauthHandler.Revoke)
 	app.POST("/introspect", oauthHandler.Introspect)
 
-	adminHandler := handlers.NewAdminHandler(userRepo, clientRepo)
+	adminHandler := handlers.NewAdminHandler(cfg, userRepo, clientRepo)
+	basicAuth := handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)
 
 	// API Endpoints
-	mux.HandleFunc("POST /admin/users", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateUser))
-	mux.HandleFunc("POST /admin/clients", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateClient))
+	app.POST("/admin/users", adminHandler.CreateUser, basicAuth)
+	app.POST("/admin/clients", adminHandler.CreateClient, basicAuth)
 
 	// UI Endpoints
-	mux.HandleFunc("GET /admin/dashboard", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.DashboardUI))
-	mux.HandleFunc("POST /admin/clients/ui", handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)(adminHandler.CreateClientUI))
+	app.GET("/admin/dashboard", adminHandler.DashboardUI, basicAuth)
+	app.POST("/admin/clients/ui", adminHandler.CreateClientUI, basicAuth)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

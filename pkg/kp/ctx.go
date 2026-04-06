@@ -456,6 +456,8 @@ func (c *Ctx) Value(key any) any {
 func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 	c.ensureRequestMetadata(c.cmd, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
+	c.Res.Header().Set("X-Session-ID", c.sessionId)
+	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
 	c.Res.WriteHeader(code)
 	json.NewEncoder(c.Res).Encode(v)
 
@@ -491,6 +493,8 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 func (c *Ctx) JsonError(err *errors.Error, body any) error {
 	c.ensureRequestMetadata(c.cmd, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
+	c.Res.Header().Set("X-Session-ID", c.sessionId)
+	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
 	c.Res.WriteHeader(err.LogDependencyMetadata().AppResultHttpStatus)
 	json.NewEncoder(c.Res).Encode(body)
 
@@ -507,6 +511,8 @@ func (c *Ctx) JsonError(err *errors.Error, body any) error {
 }
 
 func (c *Ctx) Redirect(urlStr string, code int) {
+	c.Res.Header().Set("X-Session-ID", c.sessionId)
+	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
 	c.ensureRequestMetadata(c.cmd, nil)
 	http.Redirect(c.Res, c.Req, urlStr, code)
 	c.log.Info(logAction.OUTBOUND("redirect: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)+" | location-> "+urlStr), map[string]any{
@@ -528,6 +534,12 @@ func (c *Ctx) Redirect(urlStr string, code int) {
 }
 
 func (c *Ctx) RenderTemplate(templateName string, data any) error {
+	c.Res.Header().Set("Content-Type", "text/html")
+	c.Res.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Res.Header().Set("Pragma", "no-cache")
+	c.Res.Header().Set("X-Session-ID", c.sessionId)
+	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
+
 	c.ensureRequestMetadata(c.cmd, nil)
 	c.log.Info(logAction.OUTBOUND("render template: command-> "+c.cmd+" | template-> "+templateName), map[string]any{
 		"body":     data,
