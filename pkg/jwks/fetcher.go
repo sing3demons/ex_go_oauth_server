@@ -2,6 +2,9 @@ package jwks
 
 import (
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -21,37 +24,95 @@ type JWK struct {
 	Kid string `json:"kid"`
 	Kty string `json:"kty"`
 	Use string `json:"use"`
-	N   string `json:"n"`
-	E   string `json:"e"`
+	Alg string `json:"alg,omitempty"`
+
+	// RSA
+	N string `json:"n,omitempty"`
+	E string `json:"e,omitempty"`
+
+	// EC / OKP (EdDSA)
+	Crv string `json:"crv,omitempty"`
+	X   string `json:"x,omitempty"`
+	Y   string `json:"y,omitempty"` // EC only
 }
 
-// GetPublicKey converts the raw string N and E to a standard crypto.PublicKey
+// GetPublicKey converts a JWK to a standard crypto.PublicKey.
+// Supports RSA, EC (P-256), and OKP (Ed25519).
 func (k *JWK) GetPublicKey() (crypto.PublicKey, error) {
-	if k.Kty != "RSA" {
-		return nil, fmt.Errorf("unsupported key type: %s", k.Kty)
-	}
-
-	decodeBase64URL := func(s string) ([]byte, error) {
+	decodeB64 := func(s string) ([]byte, error) {
 		return base64.RawURLEncoding.DecodeString(s)
 	}
 
-	decN, err := decodeBase64URL(k.N)
-	if err != nil {
-		return nil, fmt.Errorf("invalid modulus (N): %w", err)
-	}
-	n := new(big.Int).SetBytes(decN)
+	switch k.Kty {
+	case "RSA":
+		if k.N == "" || k.E == "" {
+			return nil, errors.New("RSA key missing n or e")
+		}
+		decN, err := decodeB64(k.N)
+		if err != nil {
+			return nil, fmt.Errorf("invalid RSA modulus (N): %w", err)
+		}
+		n := new(big.Int).SetBytes(decN)
 
-	decE, err := decodeBase64URL(k.E)
-	if err != nil {
-		return nil, fmt.Errorf("invalid exponent (E): %w", err)
-	}
-	
-	var eInt int
-	for _, b := range decE {
-		eInt = (eInt << 8) | int(b)
-	}
+		decE, err := decodeB64(k.E)
+		if err != nil {
+			return nil, fmt.Errorf("invalid RSA exponent (E): %w", err)
+		}
+		var eInt int
+		for _, b := range decE {
+			eInt = (eInt << 8) | int(b)
+		}
+		return &rsa.PublicKey{N: n, E: eInt}, nil
 
-	return &rsa.PublicKey{N: n, E: eInt}, nil
+	case "EC":
+		if k.Crv == "" || k.X == "" || k.Y == "" {
+			return nil, errors.New("EC key missing crv, x, or y")
+		}
+		var curve elliptic.Curve
+		switch k.Crv {
+		case "P-256":
+			curve = elliptic.P256()
+		case "P-384":
+			curve = elliptic.P384()
+		case "P-521":
+			curve = elliptic.P521()
+		default:
+			return nil, fmt.Errorf("unsupported EC curve: %s", k.Crv)
+		}
+		decX, err := decodeB64(k.X)
+		if err != nil {
+			return nil, fmt.Errorf("invalid EC x: %w", err)
+		}
+		decY, err := decodeB64(k.Y)
+		if err != nil {
+			return nil, fmt.Errorf("invalid EC y: %w", err)
+		}
+		return &ecdsa.PublicKey{
+			Curve: curve,
+			X:     new(big.Int).SetBytes(decX),
+			Y:     new(big.Int).SetBytes(decY),
+		}, nil
+
+	case "OKP":
+		// Ed25519 only (Crv = "Ed25519")
+		if k.Crv != "Ed25519" {
+			return nil, fmt.Errorf("unsupported OKP curve: %s", k.Crv)
+		}
+		if k.X == "" {
+			return nil, errors.New("OKP key missing x")
+		}
+		decX, err := decodeB64(k.X)
+		if err != nil {
+			return nil, fmt.Errorf("invalid OKP x: %w", err)
+		}
+		if len(decX) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("invalid Ed25519 key size: %d", len(decX))
+		}
+		return ed25519.PublicKey(decX), nil
+
+	default:
+		return nil, fmt.Errorf("unsupported key type: %s", k.Kty)
+	}
 }
 
 type cachedKeys struct {
@@ -167,16 +228,23 @@ func (f *ExternalJWKSFetcher) fetchAndCacheJWKS(issuer string) (map[string]crypt
 		return nil, fmt.Errorf("failed to parse JWKS JSON: %v", err)
 	}
 
-	// 3. Parse keys into crypto.PublicKey map
+	// 3. Parse all signing keys (RSA, EC, OKP) into a kid->PublicKey map
 	parsedKeys := make(map[string]crypto.PublicKey)
 	for _, k := range jwks.Keys {
-		if k.Use != "sig" || k.Kty != "RSA" {
-			continue // skip encryption keys or non-RSA
+		// Only process signature keys
+		if k.Use != "" && k.Use != "sig" {
+			continue
 		}
 		pubKey, err := k.GetPublicKey()
-		if err == nil {
-			parsedKeys[k.Kid] = pubKey
+		if err != nil {
+			// Skip unrecognized/unsupported keys instead of failing entirely
+			continue
 		}
+		parsedKeys[k.Kid] = pubKey
+	}
+
+	if len(parsedKeys) == 0 {
+		return nil, fmt.Errorf("no usable signing keys found in JWKS for issuer %s", issuer)
 	}
 
 	// Cache for 1 hour
