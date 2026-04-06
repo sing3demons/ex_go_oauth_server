@@ -59,6 +59,20 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 		return "", errors.New("invalid_request_pkce_required_for_this_client")
 	}
 
+	// Validate code_challenge_method against server's supported list
+	if codeChallengeMethod != "" {
+		supported := false
+		for _, m := range s.cfg.Oidc.CodeChallengeMethods {
+			if m == codeChallengeMethod {
+				supported = true
+				break
+			}
+		}
+		if !supported {
+			return "", errors.New("invalid_request: unsupported code_challenge_method")
+		}
+	}
+
 	// 2. Validate Redirect URI
 	validURI := false
 	for _, uri := range client.RedirectURIs {
@@ -157,10 +171,12 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 			if hash != info.CodeChallenge {
 				return nil, errors.New("invalid_grant_pkce_mismatch")
 			}
-		} else { // default to plain
+		} else if info.CodeChallengeMethod == "plain" || info.CodeChallengeMethod == "" {
 			if codeVerifier != info.CodeChallenge {
 				return nil, errors.New("invalid_grant_pkce_mismatch")
 			}
+		} else {
+			return nil, errors.New("invalid_request: unsupported code_challenge_method")
 		}
 	}
 

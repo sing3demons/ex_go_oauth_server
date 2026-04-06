@@ -39,6 +39,9 @@ oidc:
     - "iat"
     - "name"
     - "email"
+  code_challenge_methods_supported:
+    - "S256"
+    - "plain"
 
 trusted_issuers:
   - issuer: "https://accounts.google.com"

@@ -48,6 +48,7 @@ type OIDC struct {
 	IdTokenSigningAlgs       []string `yaml:"id_token_signing_alg_values_supported"`
 	TokenEndpointAuthMethods []string `yaml:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported          []string `yaml:"claims_supported"`
+	CodeChallengeMethods     []string `yaml:"code_challenge_methods_supported"`
 }
 
 type YamlConfig struct {

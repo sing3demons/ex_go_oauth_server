@@ -25,6 +25,7 @@ func (h *DiscoveryHandler) OpenIDConfiguration(ctx *kp.Ctx) {
 		"token_endpoint":                        h.cfg.Issuer + "/token",
 		"userinfo_endpoint":                     h.cfg.Issuer + "/userinfo",
 		"jwks_uri":                              h.cfg.Issuer + "/jwks.json",
+		"revocation_endpoint":                   h.cfg.Issuer + "/revoke",
 		"scopes_supported":                      h.cfg.GetArray("oidc.scopes_supported"),
 		"response_types_supported":              h.cfg.GetArray("oidc.response_types_supported"),
 		"grant_types_supported":                 h.cfg.GetArray("oidc.grant_types_supported"),
@@ -32,6 +33,7 @@ func (h *DiscoveryHandler) OpenIDConfiguration(ctx *kp.Ctx) {
 		"id_token_signing_alg_values_supported": h.cfg.GetArray("oidc.id_token_signing_alg_values_supported"),
 		"token_endpoint_auth_methods_supported": h.cfg.GetArray("oidc.token_endpoint_auth_methods_supported"),
 		"claims_supported":                      h.cfg.GetArray("oidc.claims_supported"),
+		"code_challenge_methods_supported":      h.cfg.GetArray("oidc.code_challenge_methods_supported"),
 	}
 
 	ctx.Json(http.StatusOK, discovery)
