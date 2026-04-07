@@ -792,11 +792,10 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 	ctx.Json(http.StatusOK, map[string]string{"result": "success"})
 }
 
-// Introspect (POST /introspect) ตรวจสอบสถานะของ Token ควบคู่ตาม RFC 7662
+// Introspect (POST /introspect) ตรวจสอบสถานะของ Token ตาม RFC 7662
 func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	ctx.Log("introspect")
 	if err := ctx.Req.ParseForm(); err != nil {
-		// http.Error(w, "Invalid request", http.StatusBadRequest)
 		ctx.JsonError(&response.Error{
 			Err:     err,
 			Message: response.InvalidRequest,
@@ -804,9 +803,43 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 		return
 	}
 
+	// 1. Detect and parse client credentials
+	clientID := ctx.Req.FormValue("client_id")
+	clientSecret := ctx.Req.FormValue("client_secret")
+
+	var usedAuthMethod string
+	basicID, basicSecret, hasBasicAuth := ctx.Req.BasicAuth()
+	if hasBasicAuth {
+		usedAuthMethod = "client_secret_basic"
+		if clientID == "" {
+			clientID = basicID
+		}
+		if clientSecret == "" {
+			clientSecret = basicSecret
+		}
+	} else if clientSecret != "" {
+		usedAuthMethod = "client_secret_post"
+	} else {
+		usedAuthMethod = "none"
+	}
+
+	if clientID == "" {
+		ctx.JsonError(&response.Error{
+			Err:     fmt.Errorf("missing client credentials"),
+			Message: response.InvalidRequest,
+		}, response.InvalidRequest.Error())
+		return
+	}
+
+	// 2. Authenticate the calling client
+	if _, err := h.oauthService.AuthenticateClient(ctx, clientID, clientSecret, usedAuthMethod); err != nil {
+		// RFC 7662: If client auth fails, MUST return HTTP 401
+		ctx.Json(http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": "client authentication failed"})
+		return
+	}
+
 	token := ctx.Req.FormValue("token")
 	if token == "" {
-		// http.Error(w, "missing_token", http.StatusBadRequest)
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("missing token"),
 			Message: response.InvalidRequest,
@@ -843,8 +876,8 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 		resp["scope"] = strings.Join(scopes, " ")
 	}
 
-	if clientID, ok := claims["client_id"].(string); ok {
-		resp["client_id"] = clientID
+	if cid, ok := claims["client_id"].(string); ok {
+		resp["client_id"] = cid
 	}
 
 	ctx.Json(http.StatusOK, resp)

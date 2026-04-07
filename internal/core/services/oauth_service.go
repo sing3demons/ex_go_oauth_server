@@ -20,10 +20,10 @@ import (
 )
 
 type OAuthService struct {
-	clientRepo ports.ClientRepository
-	authCache  ports.AuthCodeCache
-	rtRepo     ports.RefreshTokenRepository
-	keyService *KeyService
+	clientRepo  ports.ClientRepository
+	authCache   ports.AuthCodeCache
+	rtRepo      ports.RefreshTokenRepository
+	keyService  *KeyService
 	userRepo    ports.UserRepository
 	cfg         *config.Config
 	jwksFetcher *jwks.ExternalJWKSFetcher
@@ -38,10 +38,10 @@ func NewOAuthService(
 	cfg *config.Config,
 ) *OAuthService {
 	return &OAuthService{
-		clientRepo: clientRepo,
-		authCache:  authCache,
-		rtRepo:     rtRepo,
-		keyService: keyService,
+		clientRepo:  clientRepo,
+		authCache:   authCache,
+		rtRepo:      rtRepo,
+		keyService:  keyService,
 		userRepo:    userRepo,
 		cfg:         cfg,
 		jwksFetcher: jwks.NewExternalJWKSFetcher(),
@@ -172,18 +172,19 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		if codeVerifier == "" {
 			return nil, errors.New("invalid_request_missing_code_verifier")
 		}
-		if info.CodeChallengeMethod == "S256" {
+		switch info.CodeChallengeMethod {
+		case "S256":
 			h := sha256.New()
 			h.Write([]byte(codeVerifier))
 			hash := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 			if hash != info.CodeChallenge {
 				return nil, errors.New("invalid_grant_pkce_mismatch")
 			}
-		} else if info.CodeChallengeMethod == "plain" || info.CodeChallengeMethod == "" {
+		case "plain", "":
 			if codeVerifier != info.CodeChallenge {
 				return nil, errors.New("invalid_grant_pkce_mismatch")
 			}
-		} else {
+		default:
 			return nil, errors.New("invalid_request: unsupported code_challenge_method")
 		}
 	}
@@ -192,7 +193,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	if alg == "" {
 		alg = "RS256"
 	}
-	
+
 	// 4. ไปคว้ากุญแจ Signature จาก KeyService (Redis/Mongo)
 	keyMgr, err := s.keyService.GetActiveKeyManager(ctx, alg)
 	if err != nil {
@@ -491,12 +492,12 @@ func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSe
 	// 7. สร้าง Access Token (ไม่มี sub เพราะไม่มี User)
 	now := time.Now()
 	atClaims := jwt.MapClaims{
-		"iss":    s.cfg.Issuer,
-		"sub":    clientID, // M2M: sub = client_id
-		"aud":    clientID,
-		"exp":    now.Add(1 * time.Hour).Unix(),
-		"iat":    now.Unix(),
-		"scopes": finalScopes,
+		"iss":                s.cfg.Issuer,
+		"sub":                clientID, // M2M: sub = client_id
+		"aud":                clientID,
+		"exp":                now.Add(1 * time.Hour).Unix(),
+		"iat":                now.Unix(),
+		"scopes":             finalScopes,
 		"client_credentials": true, // บอก downstream ว่า flow นี้ไม่ใช่ user
 	}
 	atToken := jwt.NewWithClaims(signingMethod, atClaims)
@@ -616,7 +617,7 @@ func (s *OAuthService) TokenExchange(
 		if err != nil {
 			return nil, errors.New("invalid_token: " + err.Error())
 		}
-		
+
 		sub, ok := claims["sub"].(string)
 		if !ok {
 			return nil, errors.New("invalid_token: missing sub")
@@ -664,7 +665,7 @@ func (s *OAuthService) TokenExchange(
 		// Extract subject
 		extSub, _ := claims["sub"].(string)
 		subject = trusted.Name + "|" + extSub
-		
+
 		// External tokens might use 'scope' (string) instead of 'scopes' (array)
 		if scopeStr, ok := claims["scope"].(string); ok {
 			grantedScopes = strings.Fields(scopeStr)
@@ -716,7 +717,7 @@ func (s *OAuthService) TokenExchange(
 	if err != nil {
 		return nil, errors.New("internal_server_error_keys")
 	}
-	
+
 	signingMethod := s.getSigningMethod(alg)
 
 	now := time.Now()
@@ -744,11 +745,11 @@ func (s *OAuthService) TokenExchange(
 
 	// 6. Return response according to RFC 8693
 	return map[string]interface{}{
-		"access_token": accessToken,
+		"access_token":      accessToken,
 		"issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
-		"token_type":   "Bearer",
-		"expires_in":   3600,
-		"scope":        strings.Join(finalScopes, " "),
+		"token_type":        "Bearer",
+		"expires_in":        3600,
+		"scope":             strings.Join(finalScopes, " "),
 	}, nil
 }
 
