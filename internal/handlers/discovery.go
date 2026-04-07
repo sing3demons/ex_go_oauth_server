@@ -26,6 +26,8 @@ func (h *DiscoveryHandler) OpenIDConfiguration(ctx *kp.Ctx) {
 		"userinfo_endpoint":                     h.cfg.Issuer + "/userinfo",
 		"jwks_uri":                              h.cfg.Issuer + "/jwks.json",
 		"revocation_endpoint":                   h.cfg.Issuer + "/revoke",
+		"introspection_endpoint":                h.cfg.Issuer + "/introspect",
+		"end_session_endpoint":                  h.cfg.Issuer + "/logout",
 		"scopes_supported":                      h.cfg.GetArray("oidc.scopes_supported"),
 		"response_types_supported":              h.cfg.GetArray("oidc.response_types_supported"),
 		"grant_types_supported":                 h.cfg.GetArray("oidc.grant_types_supported"),

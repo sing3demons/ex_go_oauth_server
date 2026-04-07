@@ -106,5 +106,6 @@ func main() {
 	app.Use(func(next http.Handler) http.Handler {
 		return middleware.LoggerMiddleware(next, cfg, detailSlogAdapter, summarySlogAdapter, maskingSvc)
 	})
+	app.Use(handlers.CORSMiddleware())
 	app.Start()
 }

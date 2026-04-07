@@ -48,6 +48,19 @@ func NewOAuthService(
 	}
 }
 
+// AuthenticateClient looks up a client and validates its credentials using the registered auth method.
+// usedMethod: how credentials were sent ("client_secret_basic", "client_secret_post", "none")
+func (s *OAuthService) AuthenticateClient(ctx context.Context, clientID, clientSecret, usedMethod string) (*models.Client, error) {
+	client, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		return nil, errors.New("invalid_client")
+	}
+	if err := s.validateClientAuth(client, usedMethod, clientSecret); err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
 func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, redirectURI, nonce string, scopes []string, codeChallenge, codeChallengeMethod string) (string, error) {
 	// 1. ตรวจสอบความมีอยู่จริงของ Client ในระบบ (MongoDB)
 	client, err := s.clientRepo.FindByID(ctx, clientID)
