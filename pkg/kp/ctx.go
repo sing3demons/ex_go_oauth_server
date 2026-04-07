@@ -51,6 +51,7 @@ type Ctx struct {
 	cfg           *config.Config
 	sessionId     string
 	transactionId string
+	bodyBytes     []byte
 }
 
 func NewCtx(r *http.Request, w http.ResponseWriter) *Ctx {
@@ -218,37 +219,40 @@ func (c *Ctx) Bind(v any) error {
 	baseContentType := strings.Split(contentType, ";")[0]
 	baseContentType = strings.TrimSpace(baseContentType)
 
-	// Limit body size to prevent DoS
-	limitedReader := io.LimitReader(c.Req.Body, MaxBodySize)
-	bodyBytes, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return fmt.Errorf("failed to read request body: %w", err)
+	// Multipart requires streaming instead of loading entirely into a slice
+	if ContentType(baseContentType) == ContentTypeMultipartForm {
+		return c.parseMultipartForm(v)
 	}
 
-	// Check if body exceeded limit
-	if int64(len(bodyBytes)) >= MaxBodySize {
-		return fmt.Errorf("request body too large (max %d bytes)", MaxBodySize)
+	// Limit body size to prevent DoS, load into cache if not yet read
+	if c.bodyBytes == nil && c.Req.Body != nil {
+		limitedReader := io.LimitReader(c.Req.Body, MaxBodySize)
+		bodyBytes, err := io.ReadAll(limitedReader)
+		if err != nil {
+			return fmt.Errorf("failed to read request body: %w", err)
+		}
+		// Check if body exceeded limit
+		if int64(len(bodyBytes)) >= MaxBodySize {
+			return fmt.Errorf("request body too large (max %d bytes)", MaxBodySize)
+		}
+		c.bodyBytes = bodyBytes
+		// Restore body for potential raw reads (e.g. proxying bypassing Bind)
+		c.Req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
-	// Restore body for potential re-reads (e.g., logging middleware)
-	c.Req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-	// Parse based on content type
+	// Parse based on content type using cached byte array
 	switch ContentType(baseContentType) {
 	case ContentTypeJSON:
-		return c.parseJSON(bodyBytes, v)
+		return c.parseJSON(c.bodyBytes, v)
 
 	case ContentTypeXML:
-		return c.parseXML(bodyBytes, v)
+		return c.parseXML(c.bodyBytes, v)
 
 	case ContentTypeForm:
-		return c.parseFormURLEncoded(bodyBytes, v)
-
-	case ContentTypeMultipartForm:
-		return c.parseMultipartForm(v)
+		return c.parseFormURLEncoded(c.bodyBytes, v)
 
 	case ContentTypePlainText:
-		return c.parsePlainText(bodyBytes, v)
+		return c.parsePlainText(c.bodyBytes, v)
 
 	default:
 		return fmt.Errorf("unsupported content type: %s", contentType)
