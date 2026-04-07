@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -477,12 +478,12 @@ func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
 	if code >= 400 {
 		params.AppResultType = "Error"
 		params.Severity = "Critical"
-		params.AppResultCode = "50000"
+		params.AppResultCode = ToFiveDigitString(code)
 		params.AppResult = "Failed"
 	} else {
 		params.AppResultType = "Healthy"
 		params.Severity = "Normal"
-		params.AppResultCode = "20000"
+		params.AppResultCode = ToFiveDigitString(code)
 		params.AppResult = "Success"
 	}
 
@@ -527,10 +528,40 @@ func (c *Ctx) Redirect(urlStr string, code int) {
 		AppResultHttpStatus: fmt.Sprintf("%d", code),
 		AppResultType:       "Redirect",
 		Severity:            "Normal",
-		AppResultCode:       "30200",
+		AppResultCode:       ToFiveDigitString(code),
 		AppResult:           "Redirected",
 	}
 	summaryLogger.FlushWithParams(params)
+}
+
+// constraint: รับเฉพาะ int / int64 / string
+type NumberOrString interface {
+	~int | ~int64 | ~string
+}
+
+func ToFiveDigitString[T NumberOrString](v T) string {
+	var s string
+
+	switch any(v).(type) {
+	case int:
+		s = strconv.Itoa(any(v).(int))
+	case int64:
+		s = strconv.FormatInt(any(v).(int64), 10)
+	case string:
+		s = any(v).(string)
+	}
+
+	// เติม 0 ด้านขวาให้ครบ 5 ตัว
+	for len(s) < 5 {
+		s += "0"
+	}
+
+	// ตัดให้เหลือ 5 (optional)
+	if len(s) > 5 {
+		s = s[:5]
+	}
+
+	return s
 }
 
 func (c *Ctx) RenderTemplate(templateName string, data any) error {

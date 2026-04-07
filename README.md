@@ -72,6 +72,21 @@
 
 ---
 
+## 🌟 ฟีเจอร์ใหม่ล่าสุดและระดับความปลอดภัยขั้นสูง (Latest Capabilities)
+
+โปรเจกต์นี้ได้รับการยกระดับให้สอดคล้องกับมาตรฐาน OpenID Connect อย่างเข้มงวด:
+- **🔒 Multi-Algorithm Token Signing**: แจก Access/ID Token ผ่านอัลกอริธึมชั้นนำระดับโลก (`RS256`, `ES256`, `EdDSA`) โดยผูกอัตโนมัติจากคอนฟิกของแต่ละ Client
+- **👥 Pairwise Subject Identifiers**: รองรับ `subject_type=pairwise` ปกปิดประวัติผู้ใช้งานข้าม Client ป้องกันการตามรอยผู้ใช้ผ่านการแฮช Sub Identifier ด้วย Salt ถาวร
+- **🛂 Strict Client Authentication Methods (`token_endpoint_auth_method`)**:
+  - รองรับ `client_secret_basic` (Authorization Header)
+  - รองรับ `client_secret_post` (Body Payload)
+  - รองรับ `none` สำหรับ Public Clients (แอปมือถือ, SPA)
+- **🌍 OIDC Scopes & Claims Dynamic Mapping**: การันตีว่าเมื่อร้องขอ `profile` หรือ `email` ผ่าน `/authorize` จะทำการสะท้อนและ Mapping Claims เข้ากับ `id_token` หรือส่งออก `/userinfo` ให้อย่างแนบเนียน
+- **🔥 Secure Introspection (RFC 7662)**: ล็อกเป้า Endpoint `POST /introspect` ให้ตอบการสืบค้นสถานะเฉพาะกับ Client ที่มีตัวตนจริงและส่ง Credentials ถูกต้องเท่านั้น ป้องกันปัญหา Scanning Attack
+- **🚀 CORS Ready**: เปิดใช้งาน `CORSMiddleware` แบบเบ็ดเสร็จ อนุญาตให้ดึง Discovery JS/Metadata ไปใช้จากหน้าเบราว์เซอร์สำหรับนักพัฒนา OIDC Client ได้อย่างไร้รอยต่อ
+
+---
+
 ## 🗝️ สถาปัตยกรรม Key Management (JWKS)
 
 ระบบการจัดการกุญแจเข้ารหัส (RSA Key Pair) สำหรับโปรเจกต์นี้ถูกออกแบบเป็น **Graceful Key Rotation แบบ Hybrid (MongoDB + Redis)** ทรงประสิทธิภาพระดับ Enterprise โดยทำงานผ่าน Cache เพื่อรองรับการสเกลแบบ Multiple Instances (Stateless):
@@ -119,6 +134,26 @@ sequenceDiagram
 | :-: | --- | --- |
 | `GET` | `/.well-known/openid-configuration` | **OIDC Discovery**: แสดงค่า Metadata และความสามารถที่ Server นี้รองรับ |
 | `GET` | `/jwks.json` | **JWKS**: ปล่อย Public Keys สำหรับให้ Client ตรวจสอบลายเซ็น JWT ด้วยตัวเอง |
+
+### 📖 คู่มือทำความเข้าใจ OIDC Discovery (`/.well-known/openid-configuration`)
+
+ไฟล์ Discovery เปรียบเสมือน "สมุดหน้าเหลือง" ที่บอกคู่มือและวิธีการสื่อสารทั้งหมดของ OIDC Server นี้ เพื่อให้นักพัฒนาแอปฝั่ง Client รู้ว่าต้องเซ็ตอัประบบหลังบ้านให้คุยกันอย่างไร:
+
+| Parameter ใน Discovery | ความสำคัญและวิธีนำไปใช้งาน |
+| --- | --- |
+| `issuer` | **นามบัตรประจำตัวเซิร์ฟเวอร์** (เช่น `http://localhost:8080`) เซิร์ฟเวอร์นี้จะประทับตรา URL นี้ลงในฟีลด์ `iss` ของ `id_token`<br/>👉 *สิ่งที่ Client ต้องทำ:* ตรวจสอบว่าใน `id_token` ตรงกับค่านี้ เพื่อป้องกันเซิร์ฟเวอร์ปลอมสวมรอย |
+| `authorization_endpoint` / `token_endpoint` | ช่องทางพื้นฐานที่ใช้ในการรับส่งผู้ใช้ ยิงคำขอโค้ด และสั่งแลกเป็น Access Token ให้ถูกต้อง |
+| `userinfo_endpoint` | ขุมทรัพย์ข้อมูลส่วนบุคคล (Profile/Email) Client ต้องใช้ Access Token แนบเป็น `Bearer` เคาะถามข้อมูลจากช่องทางนี้ |
+| `jwks_uri` | **แม่กุญแจสาธารณะ (Public Keys)** Client ฝั่งล็อกอินต้องโหลดกุญแจทั้งหมดจาก URL นี้ ไปแกะรอยและตรวจสอบลายเซ็นของ JWT ได้ด้วยตัวเองโดยไม่ต้องยิงกลับมาภาระให้เซิร์ฟเวอร์ |
+| `revocation_endpoint` | ลานประหาร Token หากระบบตรวจพบว่าเครื่องมือถือของผู้ใช้งานผีเข้าหรือสั่ง Logout ระบบสามารถส่งคำขอมาทำลายเครื่องราง (`refresh_token`) ทิ้งได้ทันที |
+| `introspection_endpoint` | **เครื่องสแกนกรรม Token** สำหรับ "Resource Server" (API ข้างนอก) ที่ไม่ดึง Key ไปตรวจเอง ก็แค่แวะส่ง Token มาหาเราที่นี่ เพื่อฟันธงเลยว่าหมดอายุหรือโดนแบนเพิกถอนไปหรือยัง |
+| `end_session_endpoint` | (RP-Initiated Logout) จุดที่ OIDC Server เปิดรับให้แอปฝั่งลูกข่ายพาลูกเรือกระโดดร่มลงมากวาดล้าง Session Cookie บัญชีตรงกลางให้สะอาดสะอ้าน |
+| `scopes_supported` | แคตตาล็อกของสิทธิการเข้าถึงข้อมูลทั้งหมดที่อนุญาตให้ขอได้ เช่น `openid`, `profile`, `email`, `offline_access` |
+| `subject_types_supported` | นโยบายการระบุตัวตน <ul><li>`public`: ใช้ ID สมาชิกตรงๆ</li><li>`pairwise`: แอบเข้ารหัสปกปิดไอดี กันดารา/สตรีมเมอร์โดนแอปภายนอกเอาข้อมูลไปผูกโยงเข้าหากัน (Anti-Tracking)</li></ul> |
+| `id_token_signing_alg_values_supported` | ตรารับรองลายเซ็นที่รองรับ (ตัวนี้ทรงพลังสุด รองรับยิง `RS256`, `ES256`, หรือขั้นสุดยอด `EdDSA`) |
+| `token_endpoint_auth_methods_supported` | จุดรีดข้อมูล Client Authentication! บังคับว่าคุณจะต้องพิสูจน์รหัสผ่านด้วย `client_secret_basic`, ส่งไปกับกล่องข้อความ (`client_secret_post`) หรือฟรีสไตล์สำหรับแอปมือถือ (`none`) |
+| `code_challenge_methods_supported` | มาตรการความปลอดภัย PKCE (`S256`) บังคับให้แอปพลิเคชันต้องเข้ารหัสผ่านแบบลูกโซ่ เพื่อสกัดคนแอบดักจับ `code` ในอากาศ |
+
 
 ### 🔐 OAuth & OIDC Core
 | Method | Endpoint | รายละเอียด |
