@@ -42,25 +42,9 @@ func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRep
 }
 
 func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (response.MessageError, *response.Error) {
-	responseType := query.Get("response_type")
-	// Validate response_type against server's supported list from config
-	responseTypeAllowed := false
-	for _, rt := range h.cfg.Oidc.SupportedResponseTypes {
-		if rt == responseType {
-			responseTypeAllowed = true
-			break
-		}
-	}
-	if !responseTypeAllowed {
-		return response.UnsupportedResponseType, &response.Error{
-			Err:     fmt.Errorf("unsupported response_type: %s", responseType),
-			Message: response.UnsupportedResponseType,
-		}
-	}
-
 	clientID := query.Get("client_id")
 	redirectURI := query.Get("redirect_uri")
-	// Validate client exists and redirect_uri is registered
+	// 1. Validate client exists and redirect_uri is registered (MUST do first per RFC 6749 4.1.2.1)
 	client, err := h.clientRepo.FindByIDWithCache(ctx, clientID)
 	if err != nil || client == nil {
 		return response.InvalidClient, &response.Error{
@@ -80,6 +64,22 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 		return response.InvalidGrant, &response.Error{
 			Err:     fmt.Errorf("redirect_uri not registered: %s", redirectURI),
 			Message: response.InvalidGrant,
+		}
+	}
+
+	responseType := query.Get("response_type")
+	// 2. Validate response_type against server's supported list from config
+	responseTypeAllowed := false
+	for _, rt := range h.cfg.Oidc.SupportedResponseTypes {
+		if rt == responseType {
+			responseTypeAllowed = true
+			break
+		}
+	}
+	if !responseTypeAllowed {
+		return response.UnsupportedResponseType, &response.Error{
+			Err:     fmt.Errorf("unsupported response_type: %s", responseType),
+			Message: response.UnsupportedResponseType,
 		}
 	}
 
@@ -169,6 +169,28 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 	if queryTid == "" {
 		body, err := h.insertTransaction(ctx, query, tid)
 		if err != nil {
+			// RFC 6749 4.1.2.1: If redirect_uri/client_id are valid, redirect errors back to the client.
+			if body == response.UnsupportedResponseType || body == response.InvalidScope || body == response.SystemError {
+				redirectURI := query.Get("redirect_uri")
+				if redirectURI != "" {
+					u, _ := url.Parse(redirectURI)
+					q := u.Query()
+					if body == response.UnsupportedResponseType {
+						q.Set("error", "unsupported_response_type")
+					} else if body == response.InvalidScope {
+						q.Set("error", "invalid_scope")
+					} else if body == response.SystemError {
+						q.Set("error", "server_error")
+					}
+					q.Set("error_description", err.Error())
+					if state := query.Get("state"); state != "" {
+						q.Set("state", state)
+					}
+					u.RawQuery = q.Encode()
+					ctx.Redirect(u.String(), http.StatusFound)
+					return
+				}
+			}
 			ctx.JsonError(err, body.Error())
 			return
 		}
@@ -179,6 +201,27 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 			if errors.Is(err, pkgErrors.ErrNotFound) {
 				body, err := h.insertTransaction(ctx, query, tid)
 				if err != nil {
+					if body == response.UnsupportedResponseType || body == response.InvalidScope || body == response.SystemError {
+						redirectURI := query.Get("redirect_uri")
+						if redirectURI != "" {
+							u, _ := url.Parse(redirectURI)
+							q := u.Query()
+							if body == response.UnsupportedResponseType {
+								q.Set("error", "unsupported_response_type")
+							} else if body == response.InvalidScope {
+								q.Set("error", "invalid_scope")
+							} else if body == response.SystemError {
+								q.Set("error", "server_error")
+							}
+							q.Set("error_description", err.Error())
+							if state := query.Get("state"); state != "" {
+								q.Set("state", state)
+							}
+							u.RawQuery = q.Encode()
+							ctx.Redirect(u.String(), http.StatusFound)
+							return
+						}
+					}
 					ctx.JsonError(err, body.Error())
 					return
 				}
@@ -603,7 +646,7 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 		usedAuthMethod = "none"
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	var err error
 
 	switch grantType {
@@ -623,6 +666,13 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 		audience := ctx.Req.FormValue("audience")
 		scopes := strings.Fields(ctx.Req.FormValue("scope"))
 		resp, err = h.oauthService.TokenExchange(ctx, subjectToken, subjectTokenType, clientID, clientSecret, scopes, audience, usedAuthMethod)
+	case "urn:ietf:params:oauth:grant-type:jwt-bearer":
+		assertion := ctx.Req.FormValue("assertion")
+		if assertion == "" {
+			err = errors.New("invalid_request: missing assertion parameter")
+		} else {
+			resp, err = h.oauthService.JWTBearer(ctx, assertion)
+		}
 	}
 
 	if err != nil {
@@ -856,7 +906,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	}
 
 	// ถ้าถูกต้อง นำข้อมูลกลับมาแพคตามมาตรฐาน
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"active": true,
 		"iss":    claims["iss"],
 		"sub":    claims["sub"],
@@ -866,7 +916,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	}
 
 	// แปลง Array Scopes กลับเป็นวรรค (Space-separated)
-	if scopesRaw, ok := claims["scopes"].([]interface{}); ok {
+	if scopesRaw, ok := claims["scopes"].([]any); ok {
 		var scopes []string
 		for _, s := range scopesRaw {
 			if str, ok := s.(string); ok {

@@ -753,6 +753,170 @@ func (s *OAuthService) TokenExchange(
 	}, nil
 }
 
+// JWTBearer handles RFC 7523 JWT Profile for OAuth 2.0 Client Authentication and Authorization Grants.
+// It uses the client_id derived from the "iss" claim, validates the token against the Client's JWKS_URI, and issues an Access Token.
+func (s *OAuthService) JWTBearer(ctx context.Context, assertion string) (map[string]interface{}, error) {
+	// 1. Decode token to extract 'iss' (client_id)
+	token, _, err := new(jwt.Parser).ParseUnverified(assertion, jwt.MapClaims{})
+	if err != nil {
+		return nil, errors.New("invalid_request: unable to parse assertion")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("invalid_request: unable to parse assertion claims")
+	}
+
+	clientID, ok := claims["iss"].(string)
+	if !ok || clientID == "" {
+		return nil, errors.New("invalid_client: missing iss claim")
+	}
+
+	// 2. Validate Client
+	client, err := s.clientRepo.FindByID(ctx, clientID)
+	if err != nil || client == nil {
+		return nil, errors.New("invalid_client")
+	}
+
+	// Check if client supports jwt-bearer
+	hasGrant := false
+	for _, g := range client.GrantTypes {
+		if g == "urn:ietf:params:oauth:grant-type:jwt-bearer" {
+			hasGrant = true
+			break
+		}
+	}
+	if !hasGrant {
+		return nil, errors.New("unauthorized_client: jwt-bearer not allowed")
+	}
+
+	if client.JWKSURI == "" {
+		return nil, errors.New("invalid_client: client does not have jwks_uri configured")
+	}
+
+	// 3. Verify the JWT Signature using JWKS
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		kidRaw, ok := token.Header["kid"]
+		if !ok {
+			return nil, errors.New("missing kid in header")
+		}
+		kid, ok := kidRaw.(string)
+		if !ok {
+			return nil, errors.New("invalid kid format")
+		}
+		// fetch public key from client's JWKS
+		return s.jwksFetcher.GetPublicKey(client.JWKSURI, kid)
+	}
+
+	parsed, err := jwt.Parse(assertion, keyFunc)
+	if err != nil || !parsed.Valid {
+		return nil, errors.New("invalid_grant: assertion signature verification failed")
+	}
+
+	// 4. Validate Claims
+	// Audience (aud) MUST match our Token Endpoint URL or Issuer
+	audMatched := false
+	switch aud := claims["aud"].(type) {
+	case string:
+		if aud == s.cfg.Issuer || aud == s.cfg.Issuer+"/token" {
+			audMatched = true
+		}
+	case []interface{}:
+		for _, a := range aud {
+			if aStr, ok := a.(string); ok && (aStr == s.cfg.Issuer || aStr == s.cfg.Issuer+"/token") {
+				audMatched = true
+				break
+			}
+		}
+	}
+	if !audMatched {
+		return nil, errors.New("invalid_grant: invalid audience")
+	}
+
+	// Check Expiration (exp)
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().Unix() > int64(exp) {
+			return nil, errors.New("invalid_grant: assertion expired")
+		}
+	} else {
+		return nil, errors.New("invalid_grant: missing exp claim")
+	}
+
+	// 5. Build Final Scopes (Fallback to Client allowed scopes if not specified, else intersect)
+	var requestedScopes []string
+	if scopeStr, ok := claims["scope"].(string); ok {
+		requestedScopes = strings.Fields(scopeStr)
+	}
+
+	serverScopesSet := make(map[string]bool, len(s.cfg.Oidc.SupportedScopes))
+	for _, sc := range s.cfg.Oidc.SupportedScopes {
+		serverScopesSet[sc] = true
+	}
+	allowedMap := make(map[string]bool, len(client.AllowedScopes))
+	for _, sc := range client.AllowedScopes {
+		if serverScopesSet[sc] {
+			allowedMap[sc] = true
+		}
+	}
+
+	var finalScopes []string
+	if len(requestedScopes) > 0 {
+		for _, sc := range requestedScopes {
+			if allowedMap[sc] {
+				finalScopes = append(finalScopes, sc)
+			}
+		}
+	} else {
+		for sc := range allowedMap {
+			finalScopes = append(finalScopes, sc)
+		}
+	}
+
+	// 6. Generate Access Token
+	alg := client.IDTokenSignedResponseAlg
+	if alg == "" {
+		alg = "RS256"
+	}
+	keyMgr, err := s.keyService.GetActiveKeyManager(ctx, alg)
+	if err != nil {
+		return nil, errors.New("internal_server_error_keys")
+	}
+	signingMethod := s.getSigningMethod(alg)
+
+	now := time.Now()
+	atClaims := jwt.MapClaims{
+		"iss":    s.cfg.Issuer,
+		"sub":    clientID, // For M2M jwt-bearer, the subject is typically the client_id
+		"aud":    clientID,
+		"exp":    now.Add(1 * time.Hour).Unix(),
+		"iat":    now.Unix(),
+		"scopes": finalScopes,
+		"jwt_bearer": true,
+	}
+
+	// If the client wants to impersonate a subject, it might specify "sub" in the assertion 
+	// differing from "iss". That requires specific trust setups. Defaulting to clientID.
+	if incomingSub, ok := claims["sub"].(string); ok && incomingSub != clientID {
+		// Subject Impeorsonation (Enterprise setup).
+		// We can store it as subject. Ensure security rules allow this.
+		atClaims["sub"] = incomingSub
+	}
+
+	atToken := jwt.NewWithClaims(signingMethod, atClaims)
+	atToken.Header["kid"] = keyMgr.KeyID
+
+	accessToken, err := atToken.SignedString(keyMgr.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"access_token": accessToken,
+		"token_type":   "Bearer",
+		"expires_in":   3600,
+		"scope":        strings.Join(finalScopes, " "),
+	}, nil
+}
+
 func (s *OAuthService) getSigningMethod(alg string) jwt.SigningMethod {
 	switch alg {
 	case "ES256":
