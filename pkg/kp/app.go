@@ -107,7 +107,9 @@ func (m *Microservice) Use(middleware Middleware) {
 func (m *Microservice) preHandle(handler MyHandler, middlewares ...Middleware) http.HandlerFunc {
 	// Wrap MyHandler into http.HandlerFunc
 	final := func(w http.ResponseWriter, r *http.Request) {
-		handler(newMuxContext(r, w, m.config))
+		ctx := AcquireCtx(r, w, m.config)
+		handler(ctx)
+		ReleaseCtx(ctx)
 	}
 	// Apply middlewares in reverse order (so the first is outermost)
 	for i := len(middlewares) - 1; i >= 0; i-- {

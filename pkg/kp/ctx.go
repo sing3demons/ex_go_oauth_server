@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,12 +55,39 @@ type Ctx struct {
 	bodyBytes     []byte
 }
 
-func NewCtx(r *http.Request, w http.ResponseWriter) *Ctx {
-	_log := mlog.L(r.Context())
-	return &Ctx{Req: r, Res: w, log: _log}
+var ctxPool = sync.Pool{
+	New: func() any {
+		return &Ctx{}
+	},
 }
-func newMuxContext(r *http.Request, w http.ResponseWriter, cfg *config.Config) *Ctx {
-	return &Ctx{Req: r, Res: w, log: mlog.L(r.Context()), cfg: cfg}
+
+// Reset clears the state of Ctx so it can be safely reused
+func (c *Ctx) Reset(r *http.Request, w http.ResponseWriter, cfg *config.Config) {
+	c.Req = r
+	c.Res = w
+	if r != nil {
+		c.log = mlog.L(r.Context())
+	} else {
+		c.log = nil
+	}
+	c.cmd = ""
+	c.cfg = cfg
+	c.sessionId = ""
+	c.transactionId = ""
+	c.bodyBytes = nil
+}
+
+// AcquireCtx gets a Ctx from the pool and initializes it
+func AcquireCtx(r *http.Request, w http.ResponseWriter, cfg *config.Config) *Ctx {
+	ctx := ctxPool.Get().(*Ctx)
+	ctx.Reset(r, w, cfg)
+	return ctx
+}
+
+// ReleaseCtx puts a Ctx back into the pool, releasing references for GC
+func ReleaseCtx(c *Ctx) {
+	c.Reset(nil, nil, nil)
+	ctxPool.Put(c)
 }
 func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.CustomLogger {
 	c.cmd = cmd
