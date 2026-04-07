@@ -62,15 +62,17 @@ func NewApplication(cfg *config.Config, detailLogger logger.BaseLoggerInterface,
 
 func (m *Microservice) Start() {
 	var handler http.Handler = m.mux
-	for _, mw := range m.middlewares {
-		handler = mw(handler)
+	// Apply global middlewares in reverse order so the first added wraps the outermost
+	for i := len(m.middlewares) - 1; i >= 0; i-- {
+		handler = m.middlewares[i](handler)
 	}
 	srv := http.Server{
 		Addr:         ":" + m.config.Port,
-		Handler:      handler,
-		ReadTimeout:  60 * time.Second, // เพิ่มจาก default
-		WriteTimeout: 60 * time.Second, // เพิ่มจาก default
-		IdleTimeout:  120 * time.Second,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second, // ป้องกัน Slowloris Attack
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// wg
