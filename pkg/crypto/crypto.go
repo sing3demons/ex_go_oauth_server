@@ -144,6 +144,21 @@ func ParseFromPEM(privPEM, kid string, kty string, alg string) (*CryptoManager, 
 	}, nil
 }
 
+// ParsePublicKeyFromPEM converts a Public Key PEM string back into its cryptographic object (RSA, ECDSA, Ed25519)
+func ParsePublicKeyFromPEM(pubPEM string) (interface{}, error) {
+	block, _ := pem.Decode([]byte(pubPEM))
+	if block == nil {
+		return nil, errors.New("failed to parse PEM block containing the public key")
+	}
+
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return pub, nil
+}
+
 func (c *CryptoManager) PrivateKeyPEM() string {
 	var bytes []byte
 	var err error

@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	clientID     = "d35d0eff-25ff-483b-919f-26686d3edc50"         // เปลี่ยนเป็น ClientID ของคุณจาก DB
-	clientSecret = "jvYv7omya8R7o3lakR5O0NNy1s3rUfZedO9blwRnlss=" // เปลี่ยนเป็น Secret ของคุณ
+	clientID     = "97ce5d44-ccf3-43d0-a3ed-d3f555388ea8"         // เปลี่ยนเป็น ClientID ของคุณจาก DB
+	clientSecret = "J5s00rJvFH4UyM0a19E4KCpORG175yx2T3otEtTbV3k=" // เปลี่ยนเป็น Secret ของคุณ
 	redirectURI  = "http://localhost:3000/callback"
 	authURL      = "http://localhost:8080/authorize"
 	tokenURL     = "http://localhost:8080/token"
@@ -25,7 +25,7 @@ const (
 )
 
 // ข้อมูลจำลองฐานข้อมูลในฝั่ง Client
-var sessionStore = make(map[string]map[string]interface{})
+var sessionStore = make(map[string]map[string]any)
 
 func main() {
 	http.HandleFunc("/", handleHome)
@@ -119,7 +119,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var tokenResponse map[string]interface{}
+	var tokenResponse map[string]any
 	json.NewDecoder(resp.Body).Decode(&tokenResponse)
 	accessToken := tokenResponse["access_token"].(string)
 
@@ -134,12 +134,12 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	defer userInfoResp.Body.Close()
 
-	var userInfo map[string]interface{}
+	var userInfo map[string]any
 	json.NewDecoder(userInfoResp.Body).Decode(&userInfo)
 
 	// สร้าง Session สำหรับ Client App
 	sessionID := generateRandomString(32)
-	sessionStore[sessionID] = map[string]interface{}{
+	sessionStore[sessionID] = map[string]any{
 		"user":   userInfo,
 		"tokens": tokenResponse,
 	}
@@ -162,7 +162,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tmpl := template.New("dashboard.html").Funcs(template.FuncMap{
-		"json": func(v interface{}) string {
+		"json": func(v any) string {
 			b, _ := json.MarshalIndent(v, "", "  ")
 			return string(b)
 		},

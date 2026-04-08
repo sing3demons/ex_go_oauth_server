@@ -676,13 +676,31 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	}
 
 	if err != nil {
-		// w.Header().Set("Content-Type", "application/json")
-		// w.WriteHeader(http.StatusBadRequest)
-		// json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		ctx.JsonError(&response.Error{
-			Err:     err,
-			Message: response.InvalidRequest,
-		}, response.InvalidRequest.Error())
+		// RFC 6749 § 5.2: Error response MUST be in JSON with "error" and "error_description"
+		errorType := "invalid_request"
+		errorMsg := err.Error()
+		if er, ok := err.(*response.Error); ok {
+			errorMsg = er.Err.Error()
+		}
+
+		// Map common errors to OAuth2 error codes
+		errStr := err.Error()
+		if strings.Contains(errStr, "invalid_client") {
+			errorType = "invalid_client"
+		} else if strings.Contains(errStr, "invalid_grant") {
+			errorType = "invalid_grant"
+		} else if strings.Contains(errStr, "unauthorized_client") {
+			errorType = "unauthorized_client"
+		} else if strings.Contains(errStr, "unsupported_grant_type") {
+			errorType = "unsupported_grant_type"
+		} else if strings.Contains(errStr, "invalid_scope") {
+			errorType = "invalid_scope"
+		}
+
+		ctx.Json(http.StatusBadRequest, map[string]string{
+			"error":             errorType,
+			"error_description": errorMsg,
+		})
 		return
 	}
 
@@ -759,17 +777,65 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 }
 
 // Logout (GET /logout) เปิดรับให้ยุติ Session และลบ Cookie
+// Logout (GET /logout) ยุติ Session และลบนามแฝงของผู้ใช้ตามมาตรฐาน OIDC RP-Initiated Logout
 func (h *OAuthHandler) Logout(ctx *kp.Ctx) {
 	ctx.Log("logout")
-	redirectURI := ctx.Req.URL.Query().Get("post_logout_redirect_uri")
+
+	idTokenHint := ctx.Req.URL.Query().Get("id_token_hint")
+	postLogoutRedirectURI := ctx.Req.URL.Query().Get("post_logout_redirect_uri")
+	state := ctx.Req.URL.Query().Get("state")
+
+	var redirectURI string
+	var client *models.Client
+
+	// 1. ถ้ามี id_token_hint ต้องตรวจสอบว่ากุญแจถูกต้องไหม
+	if idTokenHint != "" {
+		claims, err := h.oauthService.ValidateIDToken(ctx, idTokenHint)
+		if err == nil {
+			// ดึง client_id จาก aud ใน id_token
+			var clientID string
+			switch aud := claims["aud"].(type) {
+			case string:
+				clientID = aud
+			case []interface{}:
+				if len(aud) > 0 {
+					clientID, _ = aud[0].(string)
+				}
+			}
+
+			if clientID != "" {
+				client, _ = h.clientRepo.FindByIDWithCache(ctx, clientID)
+			}
+		}
+	}
+
+	// 2. ตรวจสอบ post_logout_redirect_uri (ต้องมี idTokenHint เสมอเพื่อความปลอดภัย)
+	if postLogoutRedirectURI != "" && client != nil {
+		valid := false
+		for _, uri := range client.PostLogoutRedirectURIs {
+			if uri == postLogoutRedirectURI {
+				valid = true
+				break
+			}
+		}
+		if valid {
+			redirectURI = postLogoutRedirectURI
+			if state != "" {
+				u, _ := url.Parse(redirectURI)
+				q := u.Query()
+				q.Set("state", state)
+				u.RawQuery = q.Encode()
+				redirectURI = u.String()
+			}
+		}
+	}
+
+	// Default fallback redirect
 	if redirectURI == "" {
 		redirectURI = "/authorize?error=Logged+out+successfully"
 	}
 
-	if _, err := url.ParseRequestURI(redirectURI); err != nil {
-		redirectURI = "/authorize?error=Logged+out+successfully"
-	}
-
+	// 3. เคลียร์ Session
 	if cookie, err := ctx.Req.Cookie("oidc_session"); err == nil {
 		sid := cookie.Value
 		if sid != "" {
@@ -777,6 +843,7 @@ func (h *OAuthHandler) Logout(ctx *kp.Ctx) {
 		}
 	}
 
+	// ลบ Cookie ก้อนเดิมทิ้ง
 	http.SetCookie(ctx.Res, &http.Cookie{
 		Name:     "oidc_session",
 		Value:    "",
@@ -831,14 +898,16 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 
 	err := h.oauthService.RevokeToken(ctx, token, clientID, clientSecret, usedAuthMethod)
 	if err != nil {
-		ctx.JsonError(&response.Error{
-			Err:     err,
-			Message: response.InvalidRequest,
-		}, response.InvalidRequest.Error())
+		// RFC 7009: Client authentication failed
+		errorType := "invalid_client"
+		ctx.Json(http.StatusUnauthorized, map[string]string{
+			"error":             errorType,
+			"error_description": err.Error(),
+		})
 		return
 	}
 
-	// w.WriteHeader(http.StatusOK)
+	// Always return 200 OK for successful revocation or invalid token
 	ctx.Json(http.StatusOK, map[string]string{"result": "success"})
 }
 

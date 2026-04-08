@@ -23,7 +23,7 @@ type ClientRepository interface {
 type KeyRepository interface {
 	Insert(ctx context.Context, key *models.KeyRecord) error
 	FindLatest(ctx context.Context, alg string) (*models.KeyRecord, error)
-	FindAll(ctx context.Context) ([]*models.KeyRecord, error)
+	FindAll(ctx context.Context, filter map[string]any) ([]*models.KeyRecord, error)
 	DeleteOldKeys(ctx context.Context, alg string, retainCount int) error
 }
 

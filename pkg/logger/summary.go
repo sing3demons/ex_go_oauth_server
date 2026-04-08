@@ -145,7 +145,7 @@ func (s *SummaryLogger) FlushError(err *response.Error) {
 
 	s.clearDetailedFields(&dto)
 
-	s.baseLogger.LogError(dto, err.Error())
+	s.baseLogger.LogError(dto, err.Err.Error())
 }
 
 func getString(v any) string {

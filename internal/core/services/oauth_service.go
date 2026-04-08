@@ -15,6 +15,7 @@ import (
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
+	"github.com/sing3demons/oauth_server/pkg/crypto"
 	"github.com/sing3demons/oauth_server/pkg/jwks"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -518,15 +519,12 @@ func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSe
 
 // ValidateAccessToken parses and verifies an access token.
 func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString string) (jwt.MapClaims, error) {
-	records, err := s.keyService.keyRepo.FindAll(ctx)
+	records, err := s.keyService.keyRepo.FindAll(ctx, map[string]any{"alg": s.cfg.GetArray("oidc.id_token_signing_alg_values_supported")})
 	if err != nil {
 		return nil, err
 	}
 
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
 		kidRaw, ok := t.Header["kid"]
 		if !ok {
 			return nil, errors.New("missing kid header")
@@ -536,7 +534,7 @@ func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString stri
 		// ค้นหา Public Key ที่ตรงกับ kid ใน JWT Header
 		for _, rec := range records {
 			if rec.Kid == kid {
-				return jwt.ParseRSAPublicKeyFromPEM([]byte(rec.PublicKeyPEM))
+				return crypto.ParsePublicKeyFromPEM(rec.PublicKeyPEM)
 			}
 		}
 		return nil, errors.New("key not found")
@@ -549,6 +547,46 @@ func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString stri
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, errors.New("invalid_token_claims")
+	}
+
+	return claims, nil
+}
+
+// ValidateIDToken parses and verifies an ID token according to OIDC spec.
+func (s *OAuthService) ValidateIDToken(ctx context.Context, tokenString string) (jwt.MapClaims, error) {
+	// For OIDC Server's own ID Tokens, we use the same key pool as Access Tokens
+	records, err := s.keyService.keyRepo.FindAll(ctx, map[string]any{"alg": s.cfg.GetArray("oidc.id_token_signing_alg_values_supported")})
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		kidRaw, ok := t.Header["kid"]
+		if !ok {
+			return nil, errors.New("missing kid header")
+		}
+		kid := kidRaw.(string)
+
+		for _, rec := range records {
+			if rec.Kid == kid {
+				return crypto.ParsePublicKeyFromPEM(rec.PublicKeyPEM)
+			}
+		}
+		return nil, errors.New("key not found")
+	})
+
+	if err != nil || !token.Valid {
+		return nil, errors.New("invalid_id_token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("invalid_token_claims")
+	}
+
+	// Basic validation: iss
+	if iss, ok := claims["iss"].(string); !ok || iss != s.cfg.Issuer {
+		return nil, errors.New("invalid_issuer")
 	}
 
 	return claims, nil

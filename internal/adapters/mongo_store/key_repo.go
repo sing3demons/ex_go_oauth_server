@@ -101,16 +101,36 @@ func (r *KeyRepository) FindLatest(ctx context.Context, alg string) (*models.Key
 	return &key, nil
 }
 
-func (r *KeyRepository) FindAll(ctx context.Context) ([]*models.KeyRecord, error) {
+func (r *KeyRepository) FindAll(ctx context.Context, filter map[string]any) ([]*models.KeyRecord, error) {
 	start := time.Now()
 	_log := mlog.L(ctx)
-	_log.SetDependencyMetadata(logger.LogDependencyMetadata{
-		Dependency: r.colName,
-	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), "keys.find({expires_at: {$gt: now() - gracePeriod}})")
+
 	// ดึงคีย์ทั้งหมดที่ยังไม่หมดตาม Grace period
 	graceLimit := time.Now().Add(-r.gracePeriod)
 
-	cursor, err := r.col.Find(ctx, bson.M{"expires_at": bson.M{"$gt": graceLimit}})
+	filterBson := bson.M{}
+	if filter != nil {
+		filterBson = BuildMongoFilter(filter)
+	}
+	if existing, ok := filterBson["expires_at"]; ok {
+		filterBson["expires_at"] = bson.M{
+			"$and": []any{
+				existing,
+				bson.M{"$gt": graceLimit},
+			},
+		}
+	} else {
+		filterBson["expires_at"] = bson.M{"$gt": graceLimit}
+	}
+	// filterBson["expires_at"] = bson.M{"$gt": graceLimit}
+
+	rawData := "db.collection.find(" + ToMongoQueryString(filterBson) + ")"
+
+	_log.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: r.colName,
+	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), rawData)
+
+	cursor, err := r.col.Find(ctx, filterBson)
 	if err != nil {
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,

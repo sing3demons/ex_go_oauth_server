@@ -13,4 +13,5 @@ type Client struct {
 	SubjectType              string   `bson:"subject_type" json:"subject_type"` // "public" or "pairwise"
 	TokenEndpointAuthMethod  string   `bson:"token_endpoint_auth_method" json:"token_endpoint_auth_method"` // "client_secret_basic", "client_secret_post", "none"
 	JWKSURI                  string   `bson:"jwks_uri" json:"jwks_uri"` // URL to fetch client public keys for jwt-bearer
+	PostLogoutRedirectURIs   []string `bson:"post_logout_redirect_uris" json:"post_logout_redirect_uris"`
 }
