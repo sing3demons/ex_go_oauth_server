@@ -13,6 +13,19 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id string) (*models.User, error)
 }
 
+type UserProfileRepository interface {
+	Create(ctx context.Context, profile *models.UserProfile) error
+	FindByUsername(ctx context.Context, username string) (*models.UserProfile, error)
+	FindByID(ctx context.Context, id string) (*models.UserProfile, error)
+}
+
+type UserCredentialRepository interface {
+	Create(ctx context.Context, credential *models.UserCredential) error
+	CreateMany(ctx context.Context, credentials []*models.UserCredential) error
+	FindByUsernamePassword(ctx context.Context, username string) (*models.UserCredential, error)
+	FindByID(ctx context.Context, id string) (*models.UserCredential, error)
+}
+
 type ClientRepository interface {
 	FindByID(ctx context.Context, clientID string) (*models.Client, error)
 	FindByIDWithCache(ctx context.Context, clientID string) (*models.Client, error)

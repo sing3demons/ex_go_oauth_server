@@ -41,12 +41,14 @@ func main() {
 	authCodeCache := redis_store.NewAuthCodeCache(redisClient)
 	sessionCache := redis_store.NewSessionCache(redisClient)
 	transactionCache := redis_store.NewTransactionCache(redisClient)
+	credentialRepo := mongo_store.NewUserCredentialRepository(db)
+	profileRepo := mongo_store.NewUserProfileRepository(db)
 
 	// Init Core Key Service
 	rtRepo := mongo_store.NewRefreshTokenRepository(db)
 	supportedAlgs := cfg.GetArray("oidc.id_token_signing_alg_values_supported")
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount, supportedAlgs)
-	oauthService := services.NewOAuthService(clientRepo, authCodeCache, rtRepo, keyService, userRepo, cfg)
+	oauthService := services.NewOAuthService(cfg, clientRepo, authCodeCache, rtRepo, keyService, userRepo, profileRepo)
 
 	// Start Key generation or fetching
 	ctx := context.Background()
@@ -63,7 +65,7 @@ func main() {
 	app.GET("/.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	app.GET("/jwks.json", discoveryHandler.JWKS)
 
-	oauthHandler := handlers.NewOAuthHandler(oauthService, userRepo, clientRepo, sessionCache, transactionCache, cfg)
+	oauthHandler := handlers.NewOAuthHandler(cfg, oauthService, userRepo, credentialRepo, profileRepo, clientRepo, sessionCache, transactionCache)
 	app.GET("/authorize", oauthHandler.Authorize)
 	app.POST("/login", oauthHandler.LoginSubmit)
 	app.POST("/register", oauthHandler.RegisterSubmit)
@@ -78,7 +80,7 @@ func main() {
 	app.POST("/revoke", oauthHandler.Revoke)
 	app.POST("/introspect", oauthHandler.Introspect)
 
-	adminHandler := handlers.NewAdminHandler(cfg, userRepo, clientRepo)
+	adminHandler := handlers.NewAdminHandler(cfg, userRepo, clientRepo, credentialRepo, profileRepo)
 	basicAuth := handlers.BasicAuthMiddleware(cfg.AdminUsername, cfg.AdminPassword)
 
 	// API Endpoints

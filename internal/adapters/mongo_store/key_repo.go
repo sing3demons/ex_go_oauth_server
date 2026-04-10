@@ -55,11 +55,12 @@ func (r *KeyRepository) Insert(ctx context.Context, key *models.KeyRecord) error
 	result, err := r.col.InsertOne(ctx, key)
 
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,
 			ResponseTime: time.Since(start).Microseconds(),
-			ResultCode:   "50000",
-		}).Error(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), map[string]any{"error": err}, err.Error())
+			ResultCode:   resultCode,
+		}).Error(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), map[string]any{"error": err}, resultDesc)
 		return err
 	} else {
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -85,11 +86,12 @@ func (r *KeyRepository) FindLatest(ctx context.Context, alg string) (*models.Key
 	err := r.col.FindOne(ctx, bson.M{"alg": alg}, opts).Decode(&key)
 
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,
 			ResponseTime: time.Since(start).Microseconds(),
-			ResultCode:   "50000",
-		}).Error(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), map[string]any{"error": err}, err.Error())
+			ResultCode:   resultCode,
+		}).Error(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), map[string]any{"error": err}, resultDesc)
 		return nil, err
 	}
 	_log.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -132,21 +134,23 @@ func (r *KeyRepository) FindAll(ctx context.Context, filter map[string]any) ([]*
 
 	cursor, err := r.col.Find(ctx, filterBson)
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,
 			ResponseTime: time.Since(start).Microseconds(),
-			ResultCode:   "50000",
-		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, err.Error())
+			ResultCode:   resultCode,
+		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, resultDesc)
 		return nil, err
 	}
 
 	var keys []*models.KeyRecord
 	if err := cursor.All(ctx, &keys); err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,
 			ResponseTime: time.Since(start).Microseconds(),
-			ResultCode:   "50000",
-		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, err.Error())
+			ResultCode:   resultCode,
+		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, resultDesc)
 		return nil, err
 	}
 
@@ -168,21 +172,23 @@ func (r *KeyRepository) DeleteOldKeys(ctx context.Context, alg string, retainCou
 	opts := options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}).SetLimit(int64(retainCount))
 	cursor, err := r.col.Find(ctx, bson.M{"alg": alg}, opts)
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,
 			ResponseTime: time.Since(start).Microseconds(),
-			ResultCode:   "50000",
-		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, err.Error())
+			ResultCode:   resultCode,
+		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, resultDesc)
 		return err
 	}
 
 	var keys []models.KeyRecord
 	if err := cursor.All(ctx, &keys); err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_log.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.colName,
 			ResponseTime: time.Since(start).Microseconds(),
-			ResultCode:   "50000",
-		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, err.Error())
+			ResultCode:   resultCode,
+		}).Error(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), map[string]any{"error": err}, resultDesc)
 		return err
 	}
 

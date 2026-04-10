@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	clientID     = "97ce5d44-ccf3-43d0-a3ed-d3f555388ea8"         // เปลี่ยนเป็น ClientID ของคุณจาก DB
-	clientSecret = "J5s00rJvFH4UyM0a19E4KCpORG175yx2T3otEtTbV3k=" // เปลี่ยนเป็น Secret ของคุณ
+	clientID     = "88dbd8da-a052-4680-8731-c3401483937f"         // เปลี่ยนเป็น ClientID ของคุณจาก DB
+	clientSecret = "asDONXL7xP4qGv1PT1b69RgRrySDaLO-XHR70Gc4opA=" // เปลี่ยนเป็น Secret ของคุณ
 	redirectURI  = "http://localhost:3000/callback"
 	authURL      = "http://localhost:8080/authorize"
 	tokenURL     = "http://localhost:8080/token"

@@ -17,16 +17,20 @@ import (
 )
 
 type AdminHandler struct {
-	cfg        *config.Config
-	userRepo   ports.UserRepository
-	clientRepo ports.ClientRepository
+	cfg            *config.Config
+	userRepo       ports.UserRepository
+	clientRepo     ports.ClientRepository
+	credentialRepo ports.UserCredentialRepository
+	profileRepo    ports.UserProfileRepository
 }
 
-func NewAdminHandler(cfg *config.Config, userRepo ports.UserRepository, clientRepo ports.ClientRepository) *AdminHandler {
+func NewAdminHandler(cfg *config.Config, userRepo ports.UserRepository, clientRepo ports.ClientRepository, credentialRepo ports.UserCredentialRepository, profileRepo ports.UserProfileRepository) *AdminHandler {
 	return &AdminHandler{
-		cfg:        cfg,
-		userRepo:   userRepo,
-		clientRepo: clientRepo,
+		cfg:            cfg,
+		userRepo:       userRepo,
+		clientRepo:     clientRepo,
+		credentialRepo: credentialRepo,
+		profileRepo:    profileRepo,
 	}
 }
 
@@ -59,14 +63,38 @@ func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
 	}
 
 	user := &models.User{
-		ID:           uuid.New().String(),
-		Username:     req.Username,
-		Email:        req.Email,
-		PasswordHash: string(hash),
-		CreatedAt:    time.Now(),
+		ID:        uuid.New().String(),
+		Username:  req.Username,
+		Email:     req.Email,
+		CreatedAt: time.Now(),
+	}
+	credential := &models.UserCredential{
+		UserID:    user.ID,
+		Type:      "password",
+		Secret:    string(hash),
+		CreatedAt: time.Now(),
+	}
+	profile := &models.UserProfile{
+		UserID:    user.ID,
+		Email:     req.Email,
+		CreatedAt: time.Now(),
 	}
 
 	if err := h.userRepo.Create(ctx, user); err != nil {
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.ServerError,
+		}, response.ServerError.Error())
+		return
+	}
+	if err := h.credentialRepo.Create(ctx, credential); err != nil {
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.ServerError,
+		}, response.ServerError.Error())
+		return
+	}
+	if err := h.profileRepo.Create(ctx, profile); err != nil {
 		ctx.JsonError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
@@ -144,12 +172,12 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 	// }
 
 	data := struct {
-		Clients              []*models.Client
-		ScopesSupported     []string
-		GrantTypes          []string
-		SigningAlgs         []string
-		SubjectTypes        []string
-		AuthMethods         []string
+		Clients         []*models.Client
+		ScopesSupported []string
+		GrantTypes      []string
+		SigningAlgs     []string
+		SubjectTypes    []string
+		AuthMethods     []string
 	}{
 		Clients:         clients,
 		ScopesSupported: h.cfg.GetArray("oidc.scopes_supported"),
@@ -305,17 +333,17 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 	}
 
 	client := &models.Client{
-		ClientID:         clientID,
-		ClientSecretHash: secretHash,
-		ClientType:       clientType,
-		ClientName:       clientName,
-		RedirectURIs:     redirectURIs,
-		GrantTypes:       grantTypes,
-		AllowedScopes:           scopes,
-		RequirePKCE:             requirePKCE,
+		ClientID:                 clientID,
+		ClientSecretHash:         secretHash,
+		ClientType:               clientType,
+		ClientName:               clientName,
+		RedirectURIs:             redirectURIs,
+		GrantTypes:               grantTypes,
+		AllowedScopes:            scopes,
+		RequirePKCE:              requirePKCE,
 		IDTokenSignedResponseAlg: idTokenAlg,
-		SubjectType:             subjectType,
-		TokenEndpointAuthMethod: authMethod,
+		SubjectType:              subjectType,
+		TokenEndpointAuthMethod:  authMethod,
 	}
 
 	if err := h.clientRepo.Create(ctx.Req.Context(), client); err != nil {

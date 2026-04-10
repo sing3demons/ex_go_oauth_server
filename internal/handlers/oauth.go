@@ -22,22 +22,26 @@ import (
 )
 
 type OAuthHandler struct {
-	oauthService     *services.OAuthService
-	userRepo         ports.UserRepository
-	clientRepo       ports.ClientRepository
-	sessionCache     ports.SessionCache
-	transactionCache ports.TransactionCache
-	cfg              *config.Config
+	oauthService       *services.OAuthService
+	userRepo           ports.UserRepository
+	userCredentialRepo ports.UserCredentialRepository
+	userProfileRepo    ports.UserProfileRepository
+	clientRepo         ports.ClientRepository
+	sessionCache       ports.SessionCache
+	transactionCache   ports.TransactionCache
+	cfg                *config.Config
 }
 
-func NewOAuthHandler(oauthService *services.OAuthService, userRepo ports.UserRepository, clientRepo ports.ClientRepository, sessionCache ports.SessionCache, transactionCache ports.TransactionCache, cfg *config.Config) *OAuthHandler {
+func NewOAuthHandler(cfg *config.Config, oauthService *services.OAuthService, userRepo ports.UserRepository, userCredentialRepo ports.UserCredentialRepository, userProfileRepo ports.UserProfileRepository, clientRepo ports.ClientRepository, sessionCache ports.SessionCache, transactionCache ports.TransactionCache) *OAuthHandler {
 	return &OAuthHandler{
-		oauthService:     oauthService,
-		userRepo:         userRepo,
-		clientRepo:       clientRepo,
-		sessionCache:     sessionCache,
-		transactionCache: transactionCache,
-		cfg:              cfg,
+		oauthService:       oauthService,
+		userRepo:           userRepo,
+		userCredentialRepo: userCredentialRepo,
+		userProfileRepo:    userProfileRepo,
+		clientRepo:         clientRepo,
+		sessionCache:       sessionCache,
+		transactionCache:   transactionCache,
+		cfg:                cfg,
 	}
 }
 
@@ -155,10 +159,20 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 	sid := ctx.SessionId() // cookie override จัดการใน ensureRequestMetadata แล้ว
 	tid := ctx.TransactionId()
 	errMsg := query.Get("error")
+	client_id := query.Get("client_id")
+	redirect_uri := query.Get("redirect_uri")
 
-	if query.Get("client_id") == "" || query.Get("redirect_uri") == "" {
+	if errMsg != "" {
 		ctx.JsonError(&response.Error{
-			Err:     fmt.Errorf("missing required parameters"),
+			Err:     fmt.Errorf("error: %s", errMsg),
+			Message: response.InvalidRequest,
+		}, response.InvalidRequest.Error())
+		return
+	}
+
+	if client_id == "" || redirect_uri == "" {
+		ctx.JsonError(&response.Error{
+			Err:     fmt.Errorf("missing required parameters: client_id=%s, redirect_uri=%s", client_id, redirect_uri),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
 		return
@@ -284,14 +298,14 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	username := ctx.Req.FormValue("username")
 	password := ctx.Req.FormValue("password")
 
-	user, err := h.userRepo.FindByUsername(ctx, username)
-	if err != nil || user == nil {
+	credential, err := h.userCredentialRepo.FindByUsernamePassword(ctx, username)
+	if err != nil || credential == nil {
 		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=invalid_credentials", http.StatusFound)
 		return
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	err = bcrypt.CompareHashAndPassword([]byte(credential.Secret), []byte(password))
 	if err != nil {
 		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=invalid_credentials", http.StatusFound)
@@ -299,7 +313,7 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	}
 
 	sessionInfo := &models.SessionInfo{
-		UserID:     user.ID,
+		UserID:     credential.UserID,
 		LoggedInAt: time.Now(),
 	}
 	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
@@ -393,16 +407,55 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		return
 	}
 
+	dateNow := time.Now()
+
 	user := &models.User{
-		ID:           uuid.New().String(),
-		Username:     username,
-		Email:        email,
-		PasswordHash: string(hash),
-		CreatedAt:    time.Now(),
+		ID:       uuid.New().String(),
+		Username: username,
+		Email:    email,
+		// PasswordHash: string(hash),
+		CreatedAt: dateNow,
+		UpdatedAt: dateNow,
+		Status:    "",
+	}
+	userCredentialEmail := &models.UserCredential{
+		ID:         uuid.New().String(),
+		UserID:     user.ID,
+		Type:       "password",
+		Identifier: email,
+		Secret:     string(hash),
+		Verified:   true,
+		CreatedAt:  dateNow,
+		LastUsedAt: dateNow,
+	}
+	userCredentialUser := &models.UserCredential{
+		ID:         uuid.New().String(),
+		UserID:     user.ID,
+		Type:       "password",
+		Identifier: username,
+		Secret:     string(hash),
+		Verified:   true,
+		CreatedAt:  dateNow,
+		LastUsedAt: dateNow,
+	}
+
+	profile := &models.UserProfile{
+		UserID:    user.ID,
+		Email:     email,
+		CreatedAt: dateNow,
+		UpdatedAt: dateNow,
 	}
 
 	if err := h.userRepo.Create(ctx, user); err != nil {
 		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Database+Error#register", http.StatusFound)
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=database_error#register", http.StatusFound)
+		return
+	}
+	if err := h.userCredentialRepo.CreateMany(ctx, []*models.UserCredential{userCredentialUser, userCredentialEmail}); err != nil {
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=database_error#register", http.StatusFound)
+		return
+	}
+	if err := h.userProfileRepo.Create(ctx, profile); err != nil {
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=database_error#register", http.StatusFound)
 		return
 	}

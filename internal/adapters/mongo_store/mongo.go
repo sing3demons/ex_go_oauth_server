@@ -2,12 +2,32 @@ package mongo_store
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+const (
+	// success
+	CodeSuccess = "20000"
+
+	// client
+	CodeNotFound     = "40004"
+	CodeInvalidInput = "40000"
+
+	// auth
+	CodeUnauthorized = "40001"
+
+	// server
+	CodeTimeout       = "50001"
+	CodeNetworkError  = "50002"
+	CodeDBError       = "50003"
+	CodeInternalError = "50000"
 )
 
 func NewMongoClient(uri string) (*mongo.Client, error) {
@@ -74,4 +94,53 @@ func BuildMongoFilter(input map[string]any) bson.M {
 	}
 
 	return filter
+}
+
+func classifyMongoError(err error) (resultCode string, errMsg string) {
+	if err == nil {
+		return CodeSuccess, "OK"
+	}
+
+	// ⏳ timeout
+	if errors.Is(err, context.DeadlineExceeded) {
+		return CodeTimeout, "request_timeout"
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return CodeTimeout, "request_canceled"
+	}
+
+	// 🔍 not found
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return CodeNotFound, "resource_not_found"
+	}
+
+	// 🌐 network error
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return CodeTimeout, "network_timeout"
+		}
+		return CodeNetworkError, "network_error"
+	}
+
+	// 🧠 mongo command error
+	var cmdErr mongo.CommandError
+	if errors.As(err, &cmdErr) {
+		return CodeDBError, cmdErr.Message
+	}
+
+	// 🔐 duplicate key (สำคัญมาก)
+	var writeErr mongo.WriteException
+	if errors.As(err, &writeErr) {
+		for _, e := range writeErr.WriteErrors {
+			if e.Code == 11000 {
+				return CodeInvalidInput, "duplicate_key"
+			}
+		}
+		return CodeDBError, "database_write_error"
+	}
+
+	// fallback
+	return CodeInternalError, err.Error()
 }

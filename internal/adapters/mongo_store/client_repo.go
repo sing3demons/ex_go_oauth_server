@@ -3,7 +3,6 @@ package mongo_store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -40,13 +39,12 @@ func (r *ClientRepository) Create(ctx context.Context, client *models.Client) er
 	result, err := r.col.InsertOne(ctx, client)
 	end := time.Since(start).Microseconds()
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
-			ResultCode:   "50000",
-		}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "mongo -> app"), map[string]any{
-			"error": err.Error(),
-		})
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "mongo -> app"), resultDesc)
 		return err
 	}
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -71,23 +69,14 @@ func (r *ClientRepository) FindByID(ctx context.Context, clientID string) (*mode
 	err := r.col.FindOne(ctx, bson.M{"_id": clientID}).Decode(&client)
 	end := time.Since(start).Microseconds()
 	if err != nil {
-		msgErr := err
-		resultCode := "50000"
-		resultErr := err.Error()
-
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			msgErr = nil
-			resultCode = "40400"
-		}
+		resultCode, resultDesc := classifyMongoError(err)
 
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
 			ResultCode:   resultCode,
-		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
-			"error": resultErr,
-		})
-		return nil, msgErr
+		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
+		return nil, err
 	}
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency:   r.col.Name(),
@@ -109,26 +98,24 @@ func (r *ClientRepository) FindAll(ctx context.Context) ([]*models.Client, error
 	cursor, err := r.col.Find(ctx, bson.M{})
 	end := time.Since(start).Microseconds()
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
-			ResultCode:   "50000",
-		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
-			"error": err.Error(),
-		})
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
 	var clients []*models.Client
 	if err := cursor.All(ctx, &clients); err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
-			ResultCode:   "50000",
-		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
-			"error": err.Error(),
-		})
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
 		return nil, err
 	}
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{

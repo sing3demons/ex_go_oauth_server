@@ -35,13 +35,12 @@ func (r *RefreshTokenRepository) Create(ctx context.Context, rt *models.RefreshT
 	result, err := r.col.InsertOne(ctx, rt)
 	end := time.Since(start).Microseconds()
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
-			ResultCode:   "50000",
-		}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "mongo -> app"), map[string]any{
-			"error": err.Error(),
-		})
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "mongo -> app"), resultDesc)
 		return err
 	}
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -66,18 +65,13 @@ func (r *RefreshTokenRepository) FindByToken(ctx context.Context, token string) 
 	err := r.col.FindOne(ctx, bson.M{"_id": token}).Decode(&rt)
 	end := time.Since(start).Microseconds()
 	if err != nil {
-		resultCode := "50000"
-		if mongo.ErrNoDocuments == err {
-			resultCode = "40400"
-		}
+		resultCode, resultDesc := classifyMongoError(err)
 
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
 			ResultCode:   resultCode,
-		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
-			"error": err.Error(),
-		})
+		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
 		return nil, err
 	}
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -100,13 +94,12 @@ func (r *RefreshTokenRepository) Delete(ctx context.Context, token string) error
 	result, err := r.col.DeleteOne(ctx, bson.M{"_id": token})
 	end := time.Since(start).Microseconds()
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
-			ResultCode:   "50000",
-		}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), map[string]any{
-			"error": err.Error(),
-		})
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), resultDesc)
 		return err
 	}
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -129,13 +122,12 @@ func (r *RefreshTokenRepository) DeleteExpired(ctx context.Context) error {
 	result, err := r.col.DeleteMany(ctx, bson.M{"expires_at": bson.M{"$lt": time.Now()}})
 	end := time.Since(start).Microseconds()
 	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
-			ResultCode:   "50000",
-		}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), map[string]any{
-			"error": err.Error(),
-		})
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), resultDesc)
 		return err
 	}
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{

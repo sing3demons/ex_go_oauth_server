@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"strings"
 	"time"
 
@@ -26,17 +27,19 @@ type OAuthService struct {
 	rtRepo      ports.RefreshTokenRepository
 	keyService  *KeyService
 	userRepo    ports.UserRepository
+	profileRepo ports.UserProfileRepository
 	cfg         *config.Config
 	jwksFetcher *jwks.ExternalJWKSFetcher
 }
 
 func NewOAuthService(
+	cfg *config.Config,
 	clientRepo ports.ClientRepository,
 	authCache ports.AuthCodeCache,
 	rtRepo ports.RefreshTokenRepository,
 	keyService *KeyService,
 	userRepo ports.UserRepository,
-	cfg *config.Config,
+	profileRepo ports.UserProfileRepository,
 ) *OAuthService {
 	return &OAuthService{
 		clientRepo:  clientRepo,
@@ -44,6 +47,7 @@ func NewOAuthService(
 		rtRepo:      rtRepo,
 		keyService:  keyService,
 		userRepo:    userRepo,
+		profileRepo: profileRepo,
 		cfg:         cfg,
 		jwksFetcher: jwks.NewExternalJWKSFetcher(),
 	}
@@ -136,6 +140,15 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 	}
 
 	return code, nil
+}
+
+func (s *OAuthService) parseScope(scope string) map[string]bool {
+	result := map[string]bool{}
+	for _, s := range strings.Split(scope, " ") {
+		//
+		result[s] = true
+	}
+	return result
 }
 
 func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, clientSecret, redirectURI, codeVerifier, usedAuthMethod string) (map[string]interface{}, error) {
@@ -246,7 +259,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 	hasOpenID := false
 	hasEmail := false
 	hasProfile := false
-
+	scopeMap := map[string]bool{}
 	for _, scope := range info.Scopes {
 		if scope == "openid" {
 			hasOpenID = true
@@ -257,6 +270,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		if scope == "profile" {
 			hasProfile = true
 		}
+		scopeMap[scope] = true
 	}
 
 	if hasOpenID {
@@ -275,14 +289,19 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		// เติมข้อมูลตาม OIDC Standard Scopes
 		if hasEmail || hasProfile {
 			user, _ := s.userRepo.FindByID(ctx, info.UserID)
+			profile, _ := s.profileRepo.FindByID(ctx, info.UserID)
+
 			if user != nil {
 				if hasEmail {
 					idClaims["email"] = user.Email
 					idClaims["email_verified"] = true
 				}
-				if hasProfile {
-					idClaims["preferred_username"] = user.Username
-					idClaims["name"] = user.Username // mock using username as default name
+				// if hasProfile && profile != nil {
+				// idClaims["preferred_username"] = user.Username
+				// idClaims["name"] = user.Username // mock using username as default name
+				// }
+				if profile != nil {
+					maps.Copy(idClaims, profile.BuildClaims(scopeMap))
 				}
 			}
 		}
@@ -395,16 +414,28 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 			"iat": now.Unix(),
 		}
 		user, _ := s.userRepo.FindByID(ctx, rt.UserID)
+		profile, _ := s.profileRepo.FindByID(ctx, rt.UserID)
+
 		if user != nil {
-			for _, s := range rt.Scopes {
-				if s == "email" {
-					idClaims["email"] = user.Email
-					idClaims["email_verified"] = true
+			hasEmail := false
+			hasProfile := false
+			scopeMap := make(map[string]bool)
+			for _, sc := range rt.Scopes {
+				scopeMap[sc] = true
+				if sc == "email" {
+					hasEmail = true
 				}
-				if s == "profile" {
-					idClaims["preferred_username"] = user.Username
-					idClaims["name"] = user.Username
+				if sc == "profile" {
+					hasProfile = true
 				}
+			}
+
+			if hasEmail {
+				idClaims["email"] = user.Email
+				idClaims["email_verified"] = true
+			}
+			if hasProfile && profile != nil {
+				maps.Copy(idClaims, profile.BuildClaims(scopeMap))
 			}
 		}
 		idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, idClaims)
@@ -922,16 +953,16 @@ func (s *OAuthService) JWTBearer(ctx context.Context, assertion string) (map[str
 
 	now := time.Now()
 	atClaims := jwt.MapClaims{
-		"iss":    s.cfg.Issuer,
-		"sub":    clientID, // For M2M jwt-bearer, the subject is typically the client_id
-		"aud":    clientID,
-		"exp":    now.Add(1 * time.Hour).Unix(),
-		"iat":    now.Unix(),
-		"scopes": finalScopes,
+		"iss":        s.cfg.Issuer,
+		"sub":        clientID, // For M2M jwt-bearer, the subject is typically the client_id
+		"aud":        clientID,
+		"exp":        now.Add(1 * time.Hour).Unix(),
+		"iat":        now.Unix(),
+		"scopes":     finalScopes,
 		"jwt_bearer": true,
 	}
 
-	// If the client wants to impersonate a subject, it might specify "sub" in the assertion 
+	// If the client wants to impersonate a subject, it might specify "sub" in the assertion
 	// differing from "iss". That requires specific trust setups. Defaulting to clientID.
 	if incomingSub, ok := claims["sub"].(string); ok && incomingSub != clientID {
 		// Subject Impeorsonation (Enterprise setup).
