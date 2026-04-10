@@ -66,7 +66,7 @@ func (s *OAuthService) AuthenticateClient(ctx context.Context, clientID, clientS
 	return client, nil
 }
 
-func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, redirectURI, nonce string, scopes []string, codeChallenge, codeChallengeMethod string) (string, error) {
+func (s *OAuthService) GenerateAuthCode(ctx context.Context, sessionID, clientID, userID, redirectURI, nonce string, scopes []string, codeChallenge, codeChallengeMethod string) (string, error) {
 	// 1. ตรวจสอบความมีอยู่จริงของ Client ในระบบ (MongoDB)
 	client, err := s.clientRepo.FindByID(ctx, clientID)
 	if err != nil || client == nil {
@@ -135,11 +135,11 @@ func (s *OAuthService) GenerateAuthCode(ctx context.Context, clientID, userID, r
 		CodeChallengeMethod: codeChallengeMethod,
 		ExpiresAt:           time.Now().Add(ttl),
 	}
-	if err := s.authCache.SetCode(ctx, code, info, ttl); err != nil {
+	if err := s.authCache.SetCode(ctx, sessionID+code, info, ttl); err != nil {
 		return "", err
 	}
 
-	return code, nil
+	return sessionID + code, nil
 }
 
 func (s *OAuthService) parseScope(scope string) map[string]bool {

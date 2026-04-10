@@ -507,7 +507,7 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 	}
 
 	// 3. ปล่อย AuthCode ตามระบบ OAuth2
-	code, err := h.oauthService.GenerateAuthCode(ctx.Context(), tx.ClientID, userID, tx.RedirectURI, tx.Nonce, tx.Scopes, tx.CodeChallenge, tx.CodeChallengeMethod)
+	code, err := h.oauthService.GenerateAuthCode(ctx.Context(), sid, tx.ClientID, userID, tx.RedirectURI, tx.Nonce, tx.Scopes, tx.CodeChallenge, tx.CodeChallengeMethod)
 	if err != nil {
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("Failed to authorize: %s", err.Error()),

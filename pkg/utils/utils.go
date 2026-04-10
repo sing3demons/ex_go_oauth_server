@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"net/mail"
 	"regexp"
 )
@@ -13,4 +15,32 @@ func IsEmail(email string) bool {
 	}
 	_, err := mail.ParseAddress(email)
 	return err == nil
+}
+
+func NewSessionID() string {
+	b := make([]byte, 16) // 16 bytes
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func ValidateSessionID(s string) bool {
+	// 1. ความยาวต้อง 22 ตัว
+	if len(s) != 22 {
+		return false
+	}
+
+	// 2. decode base64 (URL-safe, no padding)
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return false
+	}
+
+	// 3. ต้องได้ 16 bytes
+	if len(b) != 16 {
+		return false
+	}
+
+	return true
 }

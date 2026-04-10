@@ -74,7 +74,7 @@ func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *
 			if (r.URL.Query().Get("sid")) != "" {
 				sessionID = r.URL.Query().Get("sid")
 			} else {
-				sessionID = ""
+				sessionID = utils.NewSessionID()
 			}
 		}
 		transactionID := r.Header.Get("X-Transaction-ID")

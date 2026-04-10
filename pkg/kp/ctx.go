@@ -24,6 +24,7 @@ import (
 	"github.com/sing3demons/oauth_server/pkg/middleware"
 	"github.com/sing3demons/oauth_server/pkg/mlog"
 	"github.com/sing3demons/oauth_server/pkg/response"
+	"github.com/sing3demons/oauth_server/pkg/utils"
 )
 
 const MaxBodySize = 10 << 20 // 10 MB
@@ -103,7 +104,6 @@ func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.Custo
 		"query":   c.Req.URL.Query(),
 		"body":    body,
 	}
-
 	c.ensureRequestMetadata(cmd, body)
 	c.log.Info(logAction.INBOUND("Start receiving request from API : command-> "+cmd+" | method-> "+c.Req.Method+" | path-> "+c.Req.URL.Path), incoming, maskOptions...)
 	return c.log
@@ -118,10 +118,15 @@ func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any) {
 		if cookie, err := c.Req.Cookie("oidc_session"); err == nil && cookie.Value != "" {
 			c.sessionId = cookie.Value
 		}
+	} else if cmd == "token_authorization_code" {
+		code := c.Req.FormValue("code")
+		if code != "" && len(code) <= 22 {
+			c.sessionId = code[:22]
+		}
 	}
 
 	if c.sessionId == "" {
-		c.sessionId = c.resolveRequestID("X-Session-ID", "sid", body)
+		c.sessionId = c.resolveSessionId("X-Session-ID", "sid", body)
 	}
 	if c.transactionId == "" {
 		c.transactionId = c.resolveRequestID("X-Transaction-ID", "tid", body)
@@ -151,6 +156,19 @@ func (c *Ctx) resolveRequestID(headerName, paramName string, body map[string]any
 		return value
 	}
 	return uuid.New().String()
+}
+
+func (c *Ctx) resolveSessionId(headerName, paramName string, body map[string]any) string {
+	if value := c.Req.Header.Get(headerName); value != "" {
+		return value
+	}
+	if value := c.Req.URL.Query().Get(paramName); value != "" {
+		return value
+	}
+	if value := stringifyBodyValue(body[paramName]); value != "" {
+		return value
+	}
+	return utils.NewSessionID()
 }
 
 func (c *Ctx) extractBodyValue(key string, body map[string]any, bodyBytes []byte) string {
@@ -485,7 +503,6 @@ func (c *Ctx) Deadline() (time.Time, bool) {
 func (c *Ctx) Value(key any) any {
 	return c.Context().Value(key)
 }
-
 
 func (c *Ctx) JSON(code int, v any, maskOptions ...logger.MaskingOption) error {
 	c.ensureRequestMetadata(c.cmd, nil)
