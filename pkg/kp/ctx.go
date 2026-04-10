@@ -486,7 +486,8 @@ func (c *Ctx) Value(key any) any {
 	return c.Context().Value(key)
 }
 
-func (c *Ctx) Json(code int, v any, maskOptions ...logger.MaskingOption) error {
+
+func (c *Ctx) JSON(code int, v any, maskOptions ...logger.MaskingOption) error {
 	c.ensureRequestMetadata(c.cmd, nil)
 	c.Res.Header().Set("Content-Type", "application/json")
 	c.Res.Header().Set("X-Session-ID", c.sessionId)

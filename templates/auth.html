@@ -5,7 +5,7 @@
     <title>OIDC Secure Gateway</title>
     <style>
         body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f7f9fc; margin: 0; }
-        .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 320px; }
+        .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 400px; }
         input { width: 100%; padding: 12px; margin: 10px 0 20px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
         button { width: 100%; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
         
@@ -58,6 +58,24 @@
                 <input type="text" name="username" placeholder="new username" required />
                 <label>Email</label>
                 <input type="email" name="email" placeholder="email@address.com" required />
+                <label>First Name</label>
+                <input type="text" name="given_name" placeholder="First Name" />
+                <label>Last Name</label>
+                <input type="text" name="family_name" placeholder="Last Name" />
+                <label>Nickname</label>
+                <input type="text" name="nickname" placeholder="Nickname" />
+                
+                <label>Gender</label>
+                <select name="gender" style="width: 100%; padding: 12px; margin: 10px 0 20px 0; border: 1px solid #ccc; border-radius: 6px;">
+                    <option value="">Select Gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                </select>
+
+                <label>Phone Number</label>
+                <input type="tel" name="phone_number" placeholder="+66 812345678" />
+
                 <label>Password</label>
                 <input type="password" name="password" placeholder="••••••••" required />
                 <button type="submit" class="btn-success">Create Account</button>

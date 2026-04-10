@@ -67,7 +67,7 @@ func (m *Microservice) Start() {
 		handler = m.middlewares[i](handler)
 	}
 	srv := http.Server{
-		Addr:         ":" + m.config.Port,
+		Addr:              ":" + m.config.Port,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second, // ป้องกัน Slowloris Attack
 		ReadTimeout:       60 * time.Second,
@@ -145,10 +145,10 @@ func (m *Microservice) PATCH(path string, handler MyHandler, middlewares ...Midd
 	m.add(http.MethodPatch, path, handler, middlewares...)
 }
 
-func (m *Microservice) Any(methods []string, path string, handler MyHandler, middlewares ...Middleware) {
+func (m *Microservice) Any(path string, handler MyHandler, methods ...string) {
 	allowMethods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
 	if len(methods) == 0 {
-		panic("methods cannot be empty")
+		methods = allowMethods
 	}
 
 	// Validate methods
@@ -159,7 +159,7 @@ func (m *Microservice) Any(methods []string, path string, handler MyHandler, mid
 		}
 	}
 	for _, method := range methods {
-		m.add(strings.ToUpper(method), path, handler, middlewares...)
+		m.add(strings.ToUpper(method), path, handler)
 	}
 }
 

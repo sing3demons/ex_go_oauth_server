@@ -57,8 +57,8 @@ type UserProfile struct {
 
 	Address *Address `bson:"address,omitempty" json:"address,omitempty"`
 
-	CreatedAt time.Time `bson:"created_at,omitempty" json:"created_at,omitempty"`
-	UpdatedAt time.Time `bson:"updated_at,omitempty" json:"updated_at,omitempty"`
+	CreatedAt time.Time `bson:"created_at,omitempty" json:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at,omitempty" json:"updated_at"`
 }
 
 func (p *UserProfile) BuildClaims(scope map[string]bool) map[string]interface{} {

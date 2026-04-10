@@ -102,7 +102,7 @@ func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
 		return
 	}
 
-	ctx.Json(http.StatusCreated, map[string]string{"message": "User created successfully", "id": user.ID})
+	ctx.JSON(http.StatusCreated, map[string]string{"message": "User created successfully", "id": user.ID})
 }
 
 type CreateClientRequest struct {
@@ -140,7 +140,7 @@ func (h *AdminHandler) CreateClient(ctx *kp.Ctx) {
 		return
 	}
 
-	ctx.Json(http.StatusCreated, map[string]interface{}{
+	ctx.JSON(http.StatusCreated, map[string]interface{}{
 		"message":   "Client created successfully",
 		"client_id": client.ClientID,
 	})

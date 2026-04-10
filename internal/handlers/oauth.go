@@ -365,11 +365,16 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	}
 
 	username := ctx.Req.FormValue("username")
-	password := ctx.Req.FormValue("password")
 	email := ctx.Req.FormValue("email")
+	password := ctx.Req.FormValue("password")
+	givenName := ctx.Req.FormValue("given_name")
+	familyName := ctx.Req.FormValue("family_name")
+	nickname := ctx.Req.FormValue("nickname")
+	gender := ctx.Req.FormValue("gender")
+	phoneNumber := ctx.Req.FormValue("phone_number")
 
 	// validate input
-	if username == "" || password == "" || email == "" {
+	if username == "" || email == "" || password == "" {
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("missing required fields"),
 			Message: response.MissingOrInvalidParameter,
@@ -440,10 +445,20 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	}
 
 	profile := &models.UserProfile{
-		UserID:    user.ID,
-		Email:     email,
-		CreatedAt: dateNow,
-		UpdatedAt: dateNow,
+		UserID:            user.ID,
+		Name:              fmt.Sprintf("%s %s", givenName, familyName),
+		GivenName:         givenName,
+		FamilyName:        familyName,
+		Nickname:          nickname,
+		PreferredUsername: username,
+		Email:             email,
+		EmailVerified:     true,
+		Gender:            gender,
+		CreatedAt:         dateNow,
+		UpdatedAt:         dateNow,
+	}
+	if phoneNumber != "" {
+		profile.PhoneNumber = &phoneNumber
 	}
 
 	if err := h.userRepo.Create(ctx, user); err != nil {
@@ -506,7 +521,7 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 
 	// 5. บินกลับไปเวป Client หรือส่ง JSON ถ่าไม่มี Redirect URI
 	if tx.RedirectURI == "" {
-		ctx.Json(http.StatusOK, map[string]string{
+		ctx.JSON(http.StatusOK, map[string]string{
 			"code":  code,
 			"state": tx.State,
 		})
@@ -621,7 +636,7 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 		if tx.RedirectURI == "" {
 			// w.Header().Set("Content-Type", "application/json")
 			// json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
-			// ctx.Json(http.StatusUnauthorized, map[string]string{"error": "access_denied"})
+			// ctx.JSON(http.StatusUnauthorized, map[string]string{"error": "access_denied"})
 			ctx.JsonError(&response.Error{
 				Err:     fmt.Errorf("access denied by user"),
 				Message: response.AccessDenied,
@@ -750,14 +765,14 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 			errorType = "invalid_scope"
 		}
 
-		ctx.Json(http.StatusBadRequest, map[string]string{
+		ctx.JSON(http.StatusBadRequest, map[string]string{
 			"error":             errorType,
 			"error_description": errorMsg,
 		})
 		return
 	}
 
-	ctx.Json(http.StatusOK, resp)
+	ctx.JSON(http.StatusOK, resp)
 }
 
 // UserInfo (GET /userinfo) เปิดรับให้ Web/Mobile ตรวจข้อมูลส่วนตัว
@@ -826,7 +841,7 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 		}
 	}
 
-	ctx.Json(http.StatusOK, userInfo)
+	ctx.JSON(http.StatusOK, userInfo)
 }
 
 // Logout (GET /logout) เปิดรับให้ยุติ Session และลบ Cookie
@@ -953,7 +968,7 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 	if err != nil {
 		// RFC 7009: Client authentication failed
 		errorType := "invalid_client"
-		ctx.Json(http.StatusUnauthorized, map[string]string{
+		ctx.JSON(http.StatusUnauthorized, map[string]string{
 			"error":             errorType,
 			"error_description": err.Error(),
 		})
@@ -961,7 +976,7 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 	}
 
 	// Always return 200 OK for successful revocation or invalid token
-	ctx.Json(http.StatusOK, map[string]string{"result": "success"})
+	ctx.JSON(http.StatusOK, map[string]string{"result": "success"})
 }
 
 // Introspect (POST /introspect) ตรวจสอบสถานะของ Token ตาม RFC 7662
@@ -1006,7 +1021,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	// 2. Authenticate the calling client
 	if _, err := h.oauthService.AuthenticateClient(ctx, clientID, clientSecret, usedAuthMethod); err != nil {
 		// RFC 7662: If client auth fails, MUST return HTTP 401
-		ctx.Json(http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": "client authentication failed"})
+		ctx.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": "client authentication failed"})
 		return
 	}
 
@@ -1023,7 +1038,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	claims, err := h.oauthService.ValidateAccessToken(ctx, token)
 	if err != nil {
 		// RFC กำหนดไว้ว่าถ้า Token ผิด ให้ตอบแค่ active: false
-		ctx.Json(http.StatusOK, map[string]bool{"active": false})
+		ctx.JSON(http.StatusOK, map[string]bool{"active": false})
 		return
 	}
 
@@ -1052,5 +1067,5 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 		resp["client_id"] = cid
 	}
 
-	ctx.Json(http.StatusOK, resp)
+	ctx.JSON(http.StatusOK, resp)
 }

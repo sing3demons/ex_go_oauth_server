@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/sing3demons/oauth_server/internal/handlers"
 	"github.com/sing3demons/oauth_server/pkg/kp"
 	"github.com/sing3demons/oauth_server/pkg/middleware"
+	"github.com/sing3demons/oauth_server/pkg/response"
 )
 
 func main() {
@@ -58,7 +60,6 @@ func main() {
 	log.Println("JWKS Key Management Service Initialized Successfully")
 
 	// HTTP Routing Setup
-	mux := http.NewServeMux()
 	app := kp.NewApplication(cfg, detailSlogAdapter, summarySlogAdapter)
 
 	discoveryHandler := handlers.NewDiscoveryHandler(cfg, keyService)
@@ -91,9 +92,17 @@ func main() {
 	app.GET("/admin/dashboard", adminHandler.DashboardUI, basicAuth)
 	app.POST("/admin/clients/ui", adminHandler.CreateClientUI, basicAuth)
 
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+	app.GET("/health", func(ctx *kp.Ctx) {
+		ctx.JSON(http.StatusOK, "OK")
+	})
+
+	// *
+	app.Any("/", func(ctx *kp.Ctx) {
+		ctx.Log("unknown")
+		ctx.JsonError(&response.Error{
+			Err:     fmt.Errorf("unknown endpoint"),
+			Message: response.InvalidRequest,
+		}, response.InvalidRequest.Error())
 	})
 
 	log.Printf("Starting OIDC Server on port %s", cfg.Port)

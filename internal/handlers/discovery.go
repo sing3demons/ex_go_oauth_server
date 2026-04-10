@@ -38,7 +38,7 @@ func (h *DiscoveryHandler) OpenIDConfiguration(ctx *kp.Ctx) {
 		"code_challenge_methods_supported":      h.cfg.GetArray("oidc.code_challenge_methods_supported"),
 	}
 
-	ctx.Json(http.StatusOK, discovery)
+	ctx.JSON(http.StatusOK, discovery)
 }
 
 func (h *DiscoveryHandler) JWKS(ctx *kp.Ctx) {
@@ -54,5 +54,5 @@ func (h *DiscoveryHandler) JWKS(ctx *kp.Ctx) {
 		return
 	}
 
-	ctx.Json(http.StatusOK, jwks)
+	ctx.JSON(http.StatusOK, jwks)
 }
