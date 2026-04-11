@@ -122,6 +122,46 @@ func (s *SummaryLogger) FlushWithParams(params SummaryParamsType) {
 	s.baseLogger.LogInfo(dto)
 }
 
+func (s *SummaryLogger) FlushWithParamsError(params SummaryParamsType, stack string) {
+	dto := s.customLogger.GetLogDto()
+
+	// Inject summary properties
+	dto.RecordType = "summary"
+	dto.DateTime = time.Now().Format("2006-01-02 15:04:05.000")
+	dto.ServiceTime = time.Since(s.util.GetBeginTime()).Milliseconds()
+
+	dto.AppResultHttpStatus = params.AppResultHttpStatus
+	dto.AppResultType = params.AppResultType
+	dto.Severity = params.Severity
+	dto.AppResult = params.AppResult
+	dto.AppResultCode = params.AppResultCode
+
+	// Use generic defaults if they were unset initially
+	if dto.AppResultHttpStatus == "" {
+		if dto.AppResultCode != "" && len(dto.AppResultCode) >= 3 {
+			dto.AppResultHttpStatus = dto.AppResultCode[:3]
+		} else {
+			dto.AppResultHttpStatus = "500"
+		}
+	}
+	if dto.AppResultType == "" {
+		dto.AppResultType = "Error"
+	}
+	if dto.Severity == "" {
+		dto.Severity = "Error"
+	}
+	if dto.AppResult == "" {
+		dto.AppResult = "Failed"
+	}
+	if dto.AppResultCode == "" {
+		dto.AppResultCode = "50000"
+	}
+
+	s.clearDetailedFields(&dto)
+
+	s.baseLogger.LogError(dto, stack)
+}
+
 func (s *SummaryLogger) FlushError(err *response.Error) {
 	dto := s.customLogger.GetLogDto()
 

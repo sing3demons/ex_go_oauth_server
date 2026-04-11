@@ -13,6 +13,7 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
 	FindByID(ctx context.Context, id string) (*models.User, error)
 	UpdateMFAEnabled(ctx context.Context, userID string, enabled bool) error
+	UpdateOTPThrottling(ctx context.Context, userID string, attempts int, blockedUntil *time.Time) error
 }
 
 type UserProfileRepository interface {

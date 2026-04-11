@@ -64,6 +64,42 @@ func NewOAuthHandler(
 	}
 }
 
+func (h *OAuthHandler) calculateOTPBan(attempts int) time.Duration {
+	step := attempts / 5
+	if step == 0 {
+		return 0
+	}
+
+	// Dynamic Staircase Calculation: 30s * step!
+	// Step 1 (5-9): 30s * 1 = 30s
+	// Step 2 (10-14): 30s * 2 = 60s
+	// Step 3 (15-19): 60s * 3 = 180s
+	// Step 4 (20-24): 180s * 4 = 720s (12m)
+	// Caps at 1 hour (3600s)
+
+	duration := 30 // base 30s
+	for i := 2; i <= step; i++ {
+		duration *= i
+		if duration > 3600 {
+			duration = 3600
+			break
+		}
+	}
+
+	return time.Duration(duration) * time.Second
+}
+
+func (h *OAuthHandler) isOTPBanned(user *models.User) (bool, time.Duration) {
+	if user == nil || user.OTPBlockedUntil == nil {
+		return false, 0
+	}
+	now := time.Now()
+	if now.Before(*user.OTPBlockedUntil) {
+		return true, user.OTPBlockedUntil.Sub(now)
+	}
+	return false, 0
+}
+
 func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid string) (response.MessageError, *response.Error) {
 	clientID := query.Get("client_id")
 	redirectURI := query.Get("redirect_uri")
@@ -301,7 +337,7 @@ func (h *OAuthHandler) renderAuthPage(ctx *kp.Ctx, sid, tid, errMsg string) {
 		Error: errMsg,
 	}
 
-	ctx.RenderTemplate("templates/auth.html", data)
+	ctx.RenderTemplate("templates/auth.html", data, http.StatusOK)
 }
 
 func (h *OAuthHandler) findUserByUsernameOrEmail(ctx *kp.Ctx, identifier string) (*models.UserCredential, bool, error) {
@@ -368,6 +404,15 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	}
 
 	if isEmail {
+		// 🔥 Check if user is banned
+		u, _ := h.userRepo.FindByID(ctx, credential.UserID)
+		if banned, remaining := h.isOTPBanned(u); banned {
+			ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+
+				"&error=temporary_lockout&error_description="+url.QueryEscape(fmt.Sprintf("Too many failed attempts. Try again in %d seconds.", int(remaining.Seconds()))),
+				http.StatusFound)
+			return
+		}
+
 		// 0. ลบ OTP เก่าของ user คนนี้ทิ้งก่อน เพื่อป้องกันความซ้ำซ้อน
 		h.userCredentialRepo.DeleteAllByUserIDAndType(ctx, credential.UserID, "otp")
 
@@ -403,7 +448,7 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 			"OTP":         otpCode,                                 // For demo purposes, we show the OTP on the page
 			"ExpiresAt":   exp.Unix(),                              // OTP expiry
 			"ResendAfter": time.Now().Add(60 * time.Second).Unix(), // Can resend after 60s
-		})
+		}, http.StatusOK)
 		return
 	}
 
@@ -476,7 +521,7 @@ func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 			"TID":      tid,
 			"Username": username,
 			"Error":    "Missing required parameters",
-		})
+		}, http.StatusBadRequest)
 		return
 	}
 
@@ -487,7 +532,7 @@ func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 			"TID":      tid,
 			"Username": username,
 			"Error":    "Invalid username",
-		})
+		}, http.StatusBadRequest)
 		return
 	}
 
@@ -499,7 +544,18 @@ func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 			"TID":      tid,
 			"Username": username,
 			"Error":    "User not found",
-		})
+		}, http.StatusNotFound)
+		return
+	}
+
+	// 🔥 Check if user is banned
+	if banned, remaining := h.isOTPBanned(user); banned {
+		ctx.RenderTemplate("templates/otp.html", map[string]any{
+			"SID":      sid,
+			"TID":      tid,
+			"Username": username,
+			"Error":    fmt.Sprintf("Your account is temporarily locked due to too many failed attempts. Please try again in %d seconds.", int(remaining.Seconds())),
+		}, http.StatusTooManyRequests)
 		return
 	}
 
@@ -511,7 +567,7 @@ func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 			"TID":      tid,
 			"Username": username,
 			"Error":    "Invalid or expired OTP",
-		})
+		}, http.StatusUnauthorized)
 		return
 	}
 
@@ -527,19 +583,43 @@ func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 	// check if OTP expired
 	if credential.ExpiresAt == nil || time.Now().After(*credential.ExpiresAt) {
 		renderData["Error"] = "OTP expired"
-		ctx.RenderTemplate("templates/otp.html", renderData)
+		ctx.RenderTemplate("templates/otp.html", renderData, http.StatusUnauthorized)
 		return
 	}
 
 	// 3. Validate OTP
-	// FindByUserIDAndType already checks for revoked=false and expiration
 	if credential.Secret != otpCode {
-		renderData["Error"] = "Invalid OTP code"
-		ctx.RenderTemplate("templates/otp.html", renderData)
+		// 🔥 Handle Failure and Throttling
+		newAttempts := user.OTPFailedAttempts + 1
+		var blockedUntil *time.Time
+		banDuration := h.calculateOTPBan(newAttempts)
+
+		if banDuration > 0 {
+			exp := time.Now().Add(banDuration)
+			blockedUntil = &exp
+		}
+
+		// Update throttling state in DB
+		h.userRepo.UpdateOTPThrottling(ctx, user.ID, newAttempts, blockedUntil)
+
+		errorMsg := fmt.Sprintf("Invalid OTP code. You have failed %d times.", newAttempts)
+		if banDuration > 0 {
+			errorMsg = fmt.Sprintf("Too many failed attempts. Account locked for %d seconds. Please request a new code after the ban expires.", int(banDuration.Seconds()))
+			// Invalidate current OTP on ban milestones
+			if newAttempts%5 == 0 {
+				h.userCredentialRepo.DeleteByID(ctx, credential.ID)
+			}
+		}
+
+		renderData["Error"] = errorMsg
+		ctx.RenderTemplate("templates/otp.html", renderData, http.StatusOK)
 		return
 	}
 
-	// 4. Mark OTP as used (Delete it)
+	// 4. Success Logic - Reset Throttling
+	h.userRepo.UpdateOTPThrottling(ctx, user.ID, 0, nil)
+
+	// Mark OTP as used (Delete it)
 	h.userCredentialRepo.DeleteByID(ctx, credential.ID)
 
 	// 5. Success Logic
@@ -595,6 +675,16 @@ func (h *OAuthHandler) OtpResendSubmit(ctx *kp.Ctx) {
 	user, err := h.userRepo.FindByEmail(ctx, username)
 	if err != nil || user == nil {
 		ctx.JSON(http.StatusNotFound, map[string]any{"error": "user_not_found"})
+		return
+	}
+
+	// 🔥 Check if user is banned
+	if banned, remaining := h.isOTPBanned(user); banned {
+		ctx.JSON(http.StatusForbidden, map[string]any{
+			"error":           "temporary_lockout",
+			"message":         fmt.Sprintf("Too many failed attempts. Try again in %d seconds.", int(remaining.Seconds())),
+			"remaining_delay": int(remaining.Seconds()),
+		})
 		return
 	}
 
@@ -895,7 +985,7 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 		Scopes:     tx.Scopes,
 	}
 
-	ctx.RenderTemplate("templates/consent.html", data)
+	ctx.RenderTemplate("templates/consent.html", data, http.StatusOK)
 }
 
 func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {

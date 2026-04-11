@@ -187,7 +187,7 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 		AuthMethods:     h.cfg.GetArray("oidc.token_endpoint_auth_methods_supported"),
 	}
 
-	ctx.RenderTemplate("templates/admin_dashboard.html", data)
+	ctx.RenderTemplate("templates/admin_dashboard.html", data, http.StatusOK)
 }
 
 func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
@@ -378,7 +378,7 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 		}
 		// w.Header().Set("Content-Type", "text/html")
 		// tmpl.Execute(w, data)
-		ctx.RenderTemplate("templates/client_success.html", data)
+		ctx.RenderTemplate("templates/client_success.html", data, http.StatusOK)
 		return
 	}
 

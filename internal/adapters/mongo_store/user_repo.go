@@ -186,3 +186,40 @@ func (r *UserRepository) UpdateMFAEnabled(ctx context.Context, userID string, en
 	}).Info(logAction.DB_RESPONSE(logAction.DB_UPDATE, "mongo -> app"), "success")
 	return nil
 }
+
+func (r *UserRepository) UpdateOTPThrottling(ctx context.Context, userID string, attempts int, blockedUntil *time.Time) error {
+	start := time.Now()
+	_logger := mlog.L(ctx)
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: r.col.Name(),
+	}).Info(logAction.DB_REQUEST(logAction.DB_UPDATE, "app -> mongo"), fmt.Sprintf("users.updateOne({_id: %s}, {$set: {otp_failed_attempts: %d, otp_blocked_until: %v}})", userID, attempts, blockedUntil))
+
+	update := bson.M{
+		"$set": bson.M{
+			"otp_failed_attempts": attempts,
+			"otp_blocked_until":   blockedUntil,
+			"updated_at":          time.Now(),
+		},
+	}
+
+	_, err := r.col.UpdateOne(ctx, bson.M{"_id": userID}, update)
+	end := time.Since(start).Microseconds()
+	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
+		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+			Dependency:   r.col.Name(),
+			ResponseTime: end,
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_UPDATE, "mongo -> app"), resultDesc)
+		return err
+	}
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency:   r.col.Name(),
+		ResponseTime: end,
+		ResultCode:   "20000",
+	}).Info(logAction.DB_RESPONSE(logAction.DB_UPDATE, "mongo -> app"), "success")
+	return nil
+}
+

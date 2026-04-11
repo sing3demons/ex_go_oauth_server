@@ -314,7 +314,7 @@ func (c *Ctx) Bind(v any) error {
 			if m, ok := v.(*map[string]any); ok {
 				c.bodyMap = *m
 			} else {
-				// If v is a struct, we could optionally parse into a map too, 
+				// If v is a struct, we could optionally parse into a map too,
 				// but let's keep it simple and only cache if a map is requested.
 			}
 		}
@@ -645,7 +645,7 @@ func ToFiveDigitString[T NumberOrString](v T) string {
 	return s
 }
 
-func (c *Ctx) RenderTemplate(templateName string, data any) error {
+func (c *Ctx) RenderTemplate(templateName string, data any, code int) error {
 	c.Res.Header().Set("Content-Type", "text/html")
 	c.Res.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	c.Res.Header().Set("Pragma", "no-cache")
@@ -705,14 +705,41 @@ func (c *Ctx) RenderTemplate(templateName string, data any) error {
 		})
 		return fmt.Errorf("failed to execute template: %w", res)
 	} else {
+		// check code
+		appResultCode := ToFiveDigitString(code)
+		appResult := "Success"
+		severity := "Normal"
+		appResultType := "Healthy"
+		if code >= 400 {
+			appResult = "Failed"
+			severity = "Critical"
+			appResultType = "Error"
+			// check data is type of map[string]any
+			if data, ok := data.(map[string]any); ok {
+				if err, ok := data["Error"]; ok {
+					appResult = err.(string)
+				}
+			}
+
+			params := logger.SummaryParamsType{
+				AppResultHttpStatus: fmt.Sprintf("%d", code),
+				AppResultType:       appResultType,
+				Severity:            severity,
+				AppResultCode:       appResultCode,
+				AppResult:           appResult,
+			}
+			summaryLogger.FlushWithParamsError(params, appResult)
+			return nil
+		}
 		params := logger.SummaryParamsType{
-			AppResultHttpStatus: "200",
-			AppResultType:       "Healthy",
-			Severity:            "Normal",
-			AppResultCode:       "20000",
-			AppResult:           "Success",
+			AppResultHttpStatus: fmt.Sprintf("%d", code),
+			AppResultType:       appResultType,
+			Severity:            severity,
+			AppResultCode:       appResultCode,
+			AppResult:           appResult,
 		}
 		summaryLogger.FlushWithParams(params)
+
 	}
 	return res
 }

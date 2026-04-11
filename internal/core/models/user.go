@@ -31,6 +31,10 @@ type User struct {
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
 
+	// OTP Throttling
+	OTPFailedAttempts int        `bson:"otp_failed_attempts" json:"-"`
+	OTPBlockedUntil   *time.Time `bson:"otp_blocked_until,omitempty" json:"-"`
+
 	webAuthnCredentials []webauthn.Credential `bson:"-" json:"-"`
 }
 
