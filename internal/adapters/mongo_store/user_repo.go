@@ -98,6 +98,36 @@ func (r *UserRepository) FindByUsername(ctx context.Context, username string) (*
 	})
 	return &user, nil
 }
+func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
+	start := time.Now()
+	_logger := mlog.L(ctx)
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: r.col.Name(),
+	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), "users.findOne({email: "+email+"})")
+
+	var user models.User
+	err := r.col.FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	end := time.Since(start).Microseconds()
+	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
+
+		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+			Dependency:   r.col.Name(),
+			ResponseTime: end,
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
+		return nil, err
+	}
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency:   r.col.Name(),
+		ResponseTime: end,
+		ResultCode:   "20000",
+	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
+		"result": user,
+	})
+	return &user, nil
+}
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*models.User, error) {
 	start := time.Now()

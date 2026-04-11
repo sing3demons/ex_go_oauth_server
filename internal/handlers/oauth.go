@@ -368,10 +368,14 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	}
 
 	if isEmail {
+		// 0. ลบ OTP เก่าของ user คนนี้ทิ้งก่อน เพื่อป้องกันความซ้ำซ้อน
+		h.userCredentialRepo.DeleteAllByUserIDAndType(ctx, credential.UserID, "otp")
+
 		// gen otp for email login and save to cache with 5 min TTL, then redirect to OTP verification page
 		exp := time.Now().Add(5 * time.Minute)
 		otpCode := utils.GenerateOTP(3)
 		credential := models.UserCredential{
+			ID:         uuid.New().String(),
 			UserID:     credential.UserID,
 			Type:       "otp",
 			Identifier: username,
@@ -393,10 +397,12 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		// ส่ง OTP ผ่าน Email (จำลอง)
 		// render OTP page with OTP code for demo (ใน production ต้องส่ง email เท่านั้น)
 		ctx.RenderTemplate("templates/otp.html", map[string]any{
-			"SID":      sid,
-			"TID":      tid,
-			"Username": username,
-			"OTP":      otpCode, // For demo purposes, we show the OTP on the page
+			"SID":         sid,
+			"TID":         tid,
+			"Username":    username,
+			"OTP":         otpCode,                                 // For demo purposes, we show the OTP on the page
+			"ExpiresAt":   exp.Unix(),                              // OTP expiry
+			"ResendAfter": time.Now().Add(60 * time.Second).Unix(), // Can resend after 60s
 		})
 		return
 	}
@@ -454,6 +460,175 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	})
 
 	ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+}
+
+func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
+	ctx.Log("otp_verify")
+
+	sid := ctx.Req.FormValue("sid")
+	tid := ctx.Req.FormValue("tid")
+	username := ctx.Req.FormValue("username")
+	otpCode := ctx.Req.FormValue("otp")
+
+	if sid == "" || tid == "" || username == "" || otpCode == "" {
+		ctx.RenderTemplate("templates/otp.html", map[string]any{
+			"SID":      sid,
+			"TID":      tid,
+			"Username": username,
+			"Error":    "Missing required parameters",
+		})
+		return
+	}
+
+	// is email format?
+	if !utils.IsEmail(username) {
+		ctx.RenderTemplate("templates/otp.html", map[string]any{
+			"SID":      sid,
+			"TID":      tid,
+			"Username": username,
+			"Error":    "Invalid username",
+		})
+		return
+	}
+
+	// 1. Find User to get UserID
+	user, err := h.userRepo.FindByEmail(ctx, username)
+	if err != nil || user == nil {
+		ctx.RenderTemplate("templates/otp.html", map[string]any{
+			"SID":      sid,
+			"TID":      tid,
+			"Username": username,
+			"Error":    "User not found",
+		})
+		return
+	}
+
+	// 2. Find OTP credential
+	credential, err := h.userCredentialRepo.FindByUserIDAndType(ctx, user.ID, "otp")
+	if err != nil || credential == nil {
+		ctx.RenderTemplate("templates/otp.html", map[string]any{
+			"SID":      sid,
+			"TID":      tid,
+			"Username": username,
+			"Error":    "Invalid or expired OTP",
+		})
+		return
+	}
+
+	// Prepare common data for error rendering
+	renderData := map[string]any{
+		"SID":         sid,
+		"TID":         tid,
+		"Username":    username,
+		"ExpiresAt":   credential.ExpiresAt.Unix(),
+		"ResendAfter": credential.CreatedAt.Add(60 * time.Second).Unix(), // Approximate
+	}
+
+	// check if OTP expired
+	if credential.ExpiresAt == nil || time.Now().After(*credential.ExpiresAt) {
+		renderData["Error"] = "OTP expired"
+		ctx.RenderTemplate("templates/otp.html", renderData)
+		return
+	}
+
+	// 3. Validate OTP
+	// FindByUserIDAndType already checks for revoked=false and expiration
+	if credential.Secret != otpCode {
+		renderData["Error"] = "Invalid OTP code"
+		ctx.RenderTemplate("templates/otp.html", renderData)
+		return
+	}
+
+	// 4. Mark OTP as used (Delete it)
+	h.userCredentialRepo.DeleteByID(ctx, credential.ID)
+
+	// 5. Success Logic
+	ua := user_agent.New(ctx.Req.UserAgent())
+	browser, version := ua.Browser()
+	os := ua.OS()
+	deviceInfo := fmt.Sprintf("%s (%s %s)", os, browser, version)
+
+	h.auditRepo.Save(ctx, &models.AuditLog{
+		UserID:     user.ID,
+		Event:      "login_success_otp",
+		IPAddress:  ctx.Req.RemoteAddr,
+		UserAgent:  ctx.Req.UserAgent(),
+		DeviceInfo: deviceInfo,
+	})
+
+	sessionInfo := &models.SessionInfo{
+		SID:            sid,
+		UserID:         user.ID,
+		LoggedInAt:     time.Now(),
+		LastActivityAt: time.Now(),
+		IPAddress:      ctx.Req.RemoteAddr,
+		UserAgent:      ctx.Req.UserAgent(),
+		DeviceInfo:     deviceInfo,
+	}
+	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
+
+	http.SetCookie(ctx.Res, &http.Cookie{
+		Name:     "oidc_session",
+		Value:    sid,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   86400,
+	})
+
+	ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+}
+
+func (h *OAuthHandler) OtpResendSubmit(ctx *kp.Ctx) {
+	ctx.Log("otp_resend")
+
+	sid := ctx.Req.FormValue("sid")
+	tid := ctx.Req.FormValue("tid")
+	username := ctx.Req.FormValue("username")
+
+	if sid == "" || tid == "" || username == "" {
+		ctx.JSON(http.StatusBadRequest, map[string]any{"error": "missing_parameters"})
+		return
+	}
+
+	// 1. Find User to get UserID
+	user, err := h.userRepo.FindByEmail(ctx, username)
+	if err != nil || user == nil {
+		ctx.JSON(http.StatusNotFound, map[string]any{"error": "user_not_found"})
+		return
+	}
+
+	// 2. Delete existing OTPs
+	h.userCredentialRepo.DeleteAllByUserIDAndType(ctx, user.ID, "otp")
+
+	// 3. Generate New OTP
+	exp := time.Now().Add(5 * time.Minute)
+	resendAfter := time.Now().Add(60 * time.Second)
+	otpCode := utils.GenerateOTP(3)
+	credential := models.UserCredential{
+		ID:         uuid.New().String(),
+		UserID:     user.ID,
+		Type:       "otp",
+		Identifier: username,
+		Secret:     otpCode,
+		Verified:   false,
+		CreatedAt:  time.Now(),
+		LastUsedAt: time.Now(),
+		Revoked:    false,
+		ExpiresAt:  &exp,
+	}
+	if err := h.userCredentialRepo.Create(ctx, &credential); err != nil {
+		ctx.JSON(http.StatusInternalServerError, map[string]any{"error": "system_error"})
+		return
+	}
+
+	// 4. Return success
+	ctx.JSON(http.StatusOK, map[string]any{
+		"success":      true,
+		"otp":          otpCode,
+		"expires_at":   exp.Unix(),
+		"resend_after": resendAfter.Unix(),
+	})
 }
 
 func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {

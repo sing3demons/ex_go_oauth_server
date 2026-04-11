@@ -84,6 +84,8 @@ func main() {
 
 	app.GET("/authorize", oauthHandler.Authorize)
 	app.POST("/login", oauthHandler.LoginSubmit, middleware.RateLimitMiddleware(rateLimitCache, 5, 1*time.Minute))
+	app.POST("/login/otp", oauthHandler.OtpVerifySubmit)
+	app.POST("/login/otp/resend", oauthHandler.OtpResendSubmit)
 	app.POST("/register", oauthHandler.RegisterSubmit)
 	app.GET("/consent", oauthHandler.ConsentUI)
 	app.POST("/consent", oauthHandler.ConsentSubmit)
