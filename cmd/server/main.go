@@ -28,6 +28,9 @@ func main() {
 	}
 	db := mongoClient.Database(cfg.MongoDBName)
 
+	// 🔥 Ensure DB Indexes
+	mongo_store.EnsureIndexes(mongoClient, cfg.MongoDBName)
+
 	// Init Redis
 	redisClient, err := redis_store.NewRedisClient(cfg.RedisURI)
 	if err != nil {

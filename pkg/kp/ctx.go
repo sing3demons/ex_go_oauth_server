@@ -55,6 +55,7 @@ type Ctx struct {
 	sessionId     string
 	transactionId string
 	bodyBytes     []byte
+	tmpMgr        *TemplateManager
 }
 
 var ctxPool = sync.Pool{
@@ -64,7 +65,7 @@ var ctxPool = sync.Pool{
 }
 
 // Reset clears the state of Ctx so it can be safely reused
-func (c *Ctx) Reset(r *http.Request, w http.ResponseWriter, cfg *config.Config) {
+func (c *Ctx) Reset(r *http.Request, w http.ResponseWriter, cfg *config.Config, tmpMgr *TemplateManager) {
 	c.Req = r
 	c.Res = w
 	if r != nil {
@@ -77,18 +78,19 @@ func (c *Ctx) Reset(r *http.Request, w http.ResponseWriter, cfg *config.Config) 
 	c.sessionId = ""
 	c.transactionId = ""
 	c.bodyBytes = nil
+	c.tmpMgr = tmpMgr
 }
 
 // AcquireCtx gets a Ctx from the pool and initializes it
-func AcquireCtx(r *http.Request, w http.ResponseWriter, cfg *config.Config) *Ctx {
+func AcquireCtx(r *http.Request, w http.ResponseWriter, cfg *config.Config, tmpMgr *TemplateManager) *Ctx {
 	ctx := ctxPool.Get().(*Ctx)
-	ctx.Reset(r, w, cfg)
+	ctx.Reset(r, w, cfg, tmpMgr)
 	return ctx
 }
 
 // ReleaseCtx puts a Ctx back into the pool, releasing references for GC
 func ReleaseCtx(c *Ctx) {
-	c.Reset(nil, nil, nil)
+	c.Reset(nil, nil, nil, nil) // Clear references to allow GC
 	ctxPool.Put(c)
 }
 func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.CustomLogger {
@@ -631,6 +633,23 @@ func (c *Ctx) RenderTemplate(templateName string, data any) error {
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
 	summaryLogger := c.Context().Value(constants.SummaryLoggerKey).(*logger.SummaryLogger)
 
+	if c.tmpMgr != nil {
+		tmpl, err := c.tmpMgr.GetTemplate(templateName)
+		if err == nil {
+			err = tmpl.ExecuteTemplate(c.Res, filepath.Base(templateName), data)
+			if err == nil {
+				return nil
+			}
+
+			summaryLogger.FlushError(&response.Error{
+				Message: response.SystemError,
+				Err:     err,
+			})
+			return fmt.Errorf("failed to execute template: %w", err)
+		}
+	}
+
+	// Fallback to parsing files if manager not found or failed
 	tmpl, err := template.New(templateName).Funcs(template.FuncMap{
 		"contains": strings.Contains,
 		"substr": func(s string, start, end int) string {

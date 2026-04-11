@@ -3,6 +3,7 @@ package mongo_store
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -14,15 +15,23 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+type clientCacheEntry struct {
+	client    *models.Client
+	expiresAt time.Time
+}
+
 type ClientRepository struct {
-	col    *mongo.Collection
-	client *redis.Client
+	col     *mongo.Collection
+	redis   *redis.Client
+	l1Cache map[string]clientCacheEntry
+	mu      sync.RWMutex
 }
 
 func NewClientRepository(db *mongo.Database, redisClient *redis.Client) *ClientRepository {
 	return &ClientRepository{
-		col:    db.Collection("clients"),
-		client: redisClient,
+		col:     db.Collection("clients"),
+		redis:   redisClient,
+		l1Cache: make(map[string]clientCacheEntry),
 	}
 }
 
@@ -130,6 +139,15 @@ func (r *ClientRepository) FindAll(ctx context.Context) ([]*models.Client, error
 }
 
 func (r *ClientRepository) FindByIDWithCache(ctx context.Context, clientID string) (*models.Client, error) {
+	// ⚡ 1. Try L1 Cache (In-Memory)
+	r.mu.RLock()
+	entry, ok := r.l1Cache[clientID]
+	r.mu.RUnlock()
+
+	if ok && time.Now().Before(entry.expiresAt) {
+		return entry.client, nil
+	}
+
 	cacheKey := "client:" + clientID
 	start := time.Now()
 	_logger := mlog.L(ctx)
@@ -138,7 +156,7 @@ func (r *ClientRepository) FindByIDWithCache(ctx context.Context, clientID strin
 		Dependency: "redis",
 	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> redis"), map[string]any{"key": cacheKey})
 
-	val, err := r.client.Get(ctx, cacheKey).Result()
+	val, err := r.redis.Get(ctx, cacheKey).Result()
 	end := time.Since(start).Microseconds()
 	if err == nil {
 		var client models.Client
@@ -169,7 +187,7 @@ func (r *ClientRepository) FindByIDWithCache(ctx context.Context, clientID strin
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency: "redis",
 		}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> redis"), map[string]any{"key": cacheKey, "action": "set"})
-		statusCmd := r.client.Set(ctx, cacheKey, cacheData, 1*time.Hour)
+		statusCmd := r.redis.Set(ctx, cacheKey, cacheData, 1*time.Hour)
 		_end := time.Since(_start).Microseconds()
 		if err := statusCmd.Err(); err != nil {
 			_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -185,6 +203,14 @@ func (r *ClientRepository) FindByIDWithCache(ctx context.Context, clientID strin
 			}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "redis -> app"), map[string]any{"key": cacheKey, "action": "set", "result": "success"})
 		}
 	}
+
+	// ⚡ 4. Store in L1 Cache (30s TTL)
+	r.mu.Lock()
+	r.l1Cache[clientID] = clientCacheEntry{
+		client:    client,
+		expiresAt: time.Now().Add(30 * time.Second),
+	}
+	r.mu.Unlock()
 
 	return client, nil
 }

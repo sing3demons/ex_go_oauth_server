@@ -49,14 +49,21 @@ type Microservice struct {
 	middlewares   []Middleware
 	detailLogger  logger.BaseLoggerInterface
 	summaryLogger logger.BaseLoggerInterface
+	tmpMgr        *TemplateManager
 }
 
 func NewApplication(cfg *config.Config, detailLogger logger.BaseLoggerInterface, summaryLogger logger.BaseLoggerInterface) *Microservice {
+	tmpMgr := NewTemplateManager()
+	if err := tmpMgr.LoadTemplates("templates"); err != nil {
+		log.Printf("failed to load templates: %v", err)
+	}
+
 	return &Microservice{
 		config:        cfg,
 		mux:           http.NewServeMux(),
 		detailLogger:  detailLogger,
 		summaryLogger: summaryLogger,
+		tmpMgr:        tmpMgr,
 	}
 }
 
@@ -107,7 +114,7 @@ func (m *Microservice) Use(middleware Middleware) {
 func (m *Microservice) preHandle(handler MyHandler, middlewares ...Middleware) http.HandlerFunc {
 	// Wrap MyHandler into http.HandlerFunc
 	final := func(w http.ResponseWriter, r *http.Request) {
-		ctx := AcquireCtx(r, w, m.config)
+		ctx := AcquireCtx(r, w, m.config, m.tmpMgr)
 		handler(ctx)
 		ReleaseCtx(ctx)
 	}

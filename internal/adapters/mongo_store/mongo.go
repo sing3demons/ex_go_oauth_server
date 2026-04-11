@@ -144,3 +144,37 @@ func classifyMongoError(err error) (resultCode string, errMsg string) {
 	// fallback
 	return CodeInternalError, err.Error()
 }
+
+func EnsureIndexes(client *mongo.Client, dbName string) error {
+	db := client.Database(dbName)
+
+	// 1. Clients Index
+	_, err := db.Collection("clients").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys:    bson.D{{Key: "_id", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	if err != nil {
+		log.Printf("failed to create clients index: %v", err)
+	}
+
+	// 2. User Credentials Index
+	_, err = db.Collection("user_credentials").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys:    bson.D{{Key: "identifier", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	if err != nil {
+		log.Printf("failed to create credentials index: %v", err)
+	}
+
+	// 3. User Profiles Index
+	_, err = db.Collection("user_profiles").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys:    bson.D{{Key: "user_id", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	if err != nil {
+		log.Printf("failed to create profiles index: %v", err)
+	}
+
+	log.Println("Database indexes ensured successfully.")
+	return nil
+}
