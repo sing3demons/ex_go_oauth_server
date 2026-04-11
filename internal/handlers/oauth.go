@@ -163,6 +163,12 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 	client_id := query.Get("client_id")
 	redirect_uri := query.Get("redirect_uri")
 
+	// 0. ตรวจสอบว่ามี Error มาจากหน้า Logout หรือไม่ (Allow rendering without Client context for Logout)
+	if errMsg != "" && (client_id == "" || redirect_uri == "") {
+		h.renderAuthPage(ctx, "", "", errMsg)
+		return
+	}
+
 	if errMsg != "" {
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("error: %s", errMsg),
@@ -259,6 +265,10 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 	}
 
 	// 3. Render Unified Auth Page
+	h.renderAuthPage(ctx, sid, tid, errMsg)
+}
+
+func (h *OAuthHandler) renderAuthPage(ctx *kp.Ctx, sid, tid, errMsg string) {
 	type AuthPageData struct {
 		SID   string
 		TID   string
