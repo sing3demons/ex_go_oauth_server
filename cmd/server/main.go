@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/sing3demons/oauth_server/internal/adapters/mongo_store"
 	"github.com/sing3demons/oauth_server/internal/adapters/redis_store"
@@ -45,6 +46,7 @@ func main() {
 	transactionCache := redis_store.NewTransactionCache(redisClient)
 	credentialRepo := mongo_store.NewUserCredentialRepository(db)
 	profileRepo := mongo_store.NewUserProfileRepository(db)
+	rateLimitCache := redis_store.NewRateLimitCache(redisClient)
 
 	// Init Core Key Service
 	rtRepo := mongo_store.NewRefreshTokenRepository(db)
@@ -68,7 +70,7 @@ func main() {
 
 	oauthHandler := handlers.NewOAuthHandler(cfg, oauthService, userRepo, credentialRepo, profileRepo, clientRepo, sessionCache, transactionCache)
 	app.GET("/authorize", oauthHandler.Authorize)
-	app.POST("/login", oauthHandler.LoginSubmit)
+	app.POST("/login", oauthHandler.LoginSubmit, middleware.RateLimitMiddleware(rateLimitCache, 5, 1*time.Minute))
 	app.POST("/register", oauthHandler.RegisterSubmit)
 	app.GET("/consent", oauthHandler.ConsentUI)
 	app.POST("/consent", oauthHandler.ConsentSubmit)

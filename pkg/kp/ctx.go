@@ -19,9 +19,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sing3demons/oauth_server/internal/config"
+	"github.com/sing3demons/oauth_server/pkg/constants"
 	"github.com/sing3demons/oauth_server/pkg/logAction"
 	"github.com/sing3demons/oauth_server/pkg/logger"
-	"github.com/sing3demons/oauth_server/pkg/middleware"
 	"github.com/sing3demons/oauth_server/pkg/mlog"
 	"github.com/sing3demons/oauth_server/pkg/response"
 	"github.com/sing3demons/oauth_server/pkg/utils"
@@ -520,7 +520,7 @@ func (c *Ctx) JSON(code int, v any, maskOptions ...logger.MaskingOption) error {
 	c.log.Info(logAction.OUTBOUND("response: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)), outgoing, maskOptions...)
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
 
-	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+	summaryLogger := c.Context().Value(constants.SummaryLoggerKey).(*logger.SummaryLogger)
 
 	params := logger.SummaryParamsType{
 		AppResultHttpStatus: fmt.Sprintf("%d", code),
@@ -556,7 +556,7 @@ func (c *Ctx) JsonError(err *response.Error, body any) error {
 	}
 	c.log.Info(logAction.OUTBOUND("response: command-> "+c.cmd), outgoing)
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
-	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+	summaryLogger := c.Context().Value(constants.SummaryLoggerKey).(*logger.SummaryLogger)
 	summaryLogger.FlushError(err)
 	return nil
 }
@@ -573,7 +573,7 @@ func (c *Ctx) Redirect(urlStr string, code int) {
 		"header":   c.Res.Header(),
 	})
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
-	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+	summaryLogger := c.Context().Value(constants.SummaryLoggerKey).(*logger.SummaryLogger)
 	params := logger.SummaryParamsType{
 		AppResultHttpStatus: fmt.Sprintf("%d", code),
 		AppResultType:       "Redirect",
@@ -628,7 +628,7 @@ func (c *Ctx) RenderTemplate(templateName string, data any) error {
 		"header":   c.Res.Header(),
 	})
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
-	summaryLogger := c.Context().Value(middleware.SummaryLoggerKey).(*logger.SummaryLogger)
+	summaryLogger := c.Context().Value(constants.SummaryLoggerKey).(*logger.SummaryLogger)
 
 	tmpl, err := template.ParseFiles(templateName)
 	if err != nil {

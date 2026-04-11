@@ -7,17 +7,11 @@ import (
 	"time"
 
 	"github.com/sing3demons/oauth_server/internal/config"
+	"github.com/sing3demons/oauth_server/pkg/constants"
 	"github.com/sing3demons/oauth_server/pkg/logger"
 	"github.com/sing3demons/oauth_server/pkg/utils"
 
 	"github.com/mssola/user_agent"
-)
-
-type contextKey string
-
-const (
-	DetailLoggerKey  contextKey = "detail_logger"
-	SummaryLoggerKey contextKey = "summary_logger"
 )
 
 type ResponseWriterWrapper struct {
@@ -106,8 +100,8 @@ func LoggerMiddleware(next http.Handler, cfg *config.Config, detailSlogAdapter *
 		summaryLogger := logger.NewSummaryLogger(summarySlogAdapter, detailLogger, util)
 
 		// ฝัง Loggers ไว้ใน Context
-		ctx := context.WithValue(r.Context(), DetailLoggerKey, detailLogger)
-		ctx = context.WithValue(ctx, SummaryLoggerKey, summaryLogger)
+		ctx := context.WithValue(r.Context(), constants.DetailLoggerKey, detailLogger)
+		ctx = context.WithValue(ctx, constants.SummaryLoggerKey, summaryLogger)
 
 		rw := &ResponseWriterWrapper{ResponseWriter: w, statusCode: http.StatusOK}
 
