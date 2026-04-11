@@ -132,6 +132,14 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 			}
 		}
 	}
+	// PKCE Enforcement
+	codeChallenge := query.Get("code_challenge")
+	if (client.ClientType == "public" || client.RequirePKCE) && codeChallenge == "" {
+		return response.MissingOrInvalidParameter, &response.Error{
+			Err:     fmt.Errorf("code_challenge is required for this client"),
+			Message: "PKCE is mandatory for this client",
+		}
+	}
 
 	tx := &models.AuthTransaction{
 		ClientID:            clientID,
