@@ -102,7 +102,8 @@ func main() {
 
 	app.GET("/account/sessions", accountHandler.SessionsUI)
 	app.POST("/account/sessions/revoke", accountHandler.RevokeSession)
-	
+	app.POST("/account/mfa/disable", accountHandler.DisableTOTP)
+
 	// Passkey Management Routes
 	app.GET("/account/passkeys", accountHandler.PasskeysUI)
 	app.POST("/account/passkeys/revoke", accountHandler.RevokePasskey)

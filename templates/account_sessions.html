@@ -246,7 +246,13 @@
                     <p>Status: <span style="color: {{ if .TotpEnabled }}#10b981{{ else }}#ef4444{{ end }}; font-weight: 600;">{{ if .TotpEnabled }}Enabled{{ else }}Disabled{{ end }}</span></p>
                 </div>
             </div>
-            {{ if not .TotpEnabled }}
+            {{ if .TotpEnabled }}
+            <form method="POST" action="/account/mfa/disable" style="margin: 0;" onsubmit="return confirm('ยืนยันการปิด TOTP Authenticator? คุณจะต้องตั้งค่าใหม่หากต้องการเปิดใช้งานอีกครั้ง')">
+                <button type="submit" class="revoke-btn" style="border-color: #ef4444; color: #ef4444; background: none; cursor: pointer; font-size: 0.85rem; font-weight: 600; padding: 6px 16px; border-radius: 8px; border: 1px solid;">
+                    Disable MFA
+                </button>
+            </form>
+            {{ else }}
             <a href="/mfa/setup" class="revoke-btn" style="text-decoration: none; border-color: var(--primary); color: var(--primary);">
                 Enable MFA
             </a>

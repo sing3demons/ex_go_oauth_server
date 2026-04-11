@@ -189,9 +189,9 @@
                     </div>
                 </div>
 
-                <form method="POST" action="/account/passkeys/revoke">
-                    <input type="hidden" name="id" value="{{ .ID.Hex }}">
-                    <button type="submit" class="revoke-btn" onclick="return confirm('Are you sure you want to remove this passkey? You will not be able to sign in with this device.')">
+                <form method="POST" action="/account/passkeys/revoke" onsubmit="return confirm('ลบ passkey นี้ออก? คุณจะไม่สามารถล็อกอินด้วยอุปกรณ์นี้ได้')">
+                    <input type="hidden" name="id" value="{{ .ID }}">
+                    <button type="submit" class="revoke-btn">
                         Remove
                     </button>
                 </form>

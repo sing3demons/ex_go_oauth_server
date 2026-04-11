@@ -186,6 +186,38 @@ func (r *UserCredentialRepository) FindByUsernamePassword(ctx context.Context, u
 	})
 	return &credential, nil
 }
+func (r *UserCredentialRepository) FindByEmailPassword(ctx context.Context, email string) (*models.UserCredential, error) {
+	start := time.Now()
+	_logger := mlog.L(ctx)
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: r.col.Name(),
+	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), "users.findOne({email: "+email+", type: password})")
+
+	var credential models.UserCredential
+	err := r.col.FindOne(ctx, bson.M{"identifier": email, "type": "password"}).Decode(&credential)
+	end := time.Since(start).Microseconds()
+	resultCode, resultDesc := classifyMongoError(err)
+	if err != nil {
+		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+			Dependency:   r.col.Name(),
+			ResponseTime: end,
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
+		return nil, err
+	}
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency:   r.col.Name(),
+		ResponseTime: end,
+		ResultCode:   resultCode,
+	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
+		"result": credential,
+	}, logger.MaskingOption{
+		MaskingField: "result.secret",
+		MaskingType:  logger.MaskAll,
+	})
+	return &credential, nil
+}
 
 func (r *UserCredentialRepository) FindByID(ctx context.Context, id string) (*models.UserCredential, error) {
 	start := time.Now()
@@ -340,5 +372,37 @@ func (r *UserCredentialRepository) DeleteByID(ctx context.Context, id string) er
 		ResultCode:   "20000",
 	}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), "deleted credential successfully")
 
+	return nil
+}
+
+func (r *UserCredentialRepository) DeleteAllByUserIDAndType(ctx context.Context, userID, credentialType string) error {
+	start := time.Now()
+	_logger := mlog.L(ctx)
+
+	filter := bson.M{"user_id": userID, "type": credentialType}
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: r.col.Name(),
+	}).Info(logAction.DB_REQUEST(logAction.DB_DELETE, "app -> mongo"), fmt.Sprintf("user_credentials.deleteMany({user_id: %s, type: %s})", userID, credentialType))
+
+	result, err := r.col.DeleteMany(ctx, filter)
+	end := time.Since(start).Microseconds()
+	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
+		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+			Dependency:   r.col.Name(),
+			ResponseTime: end,
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), resultDesc)
+		return err
+	}
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency:   r.col.Name(),
+		ResponseTime: end,
+		ResultCode:   "20000",
+	}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), map[string]any{
+		"deleted_count": result.DeletedCount,
+	})
 	return nil
 }

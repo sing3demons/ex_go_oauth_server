@@ -250,7 +250,43 @@ func (h *AccountHandler) RevokePasskey(ctx *kp.Ctx) {
 	cred, err := h.credRepo.FindByID(ctx, credID)
 	if err == nil && cred.UserID == session.UserID {
 		h.credRepo.DeleteByID(ctx, credID)
+
+		// ถ้าไม่มี passkey หรือ TOTP เหลืออยู่เลย ให้ปิด MFAEnabled
+		passkeysLeft, _ := h.credRepo.FindAllByUserIDAndType(ctx, session.UserID, "passkey")
+		totpLeft, _ := h.credRepo.FindAllByUserIDAndType(ctx, session.UserID, "totp")
+		if len(passkeysLeft) == 0 && len(totpLeft) == 0 {
+			h.userRepo.UpdateMFAEnabled(ctx, session.UserID, false)
+		}
 	}
 
 	ctx.Redirect("/account/passkeys", http.StatusFound)
+}
+
+// DisableTOTP (POST /account/mfa/disable) - ลบ TOTP ทั้งหมดและปิด MFAEnabled
+func (h *AccountHandler) DisableTOTP(ctx *kp.Ctx) {
+	ctx.Log("disable_totp")
+
+	cookie, err := ctx.Req.Cookie("oidc_session")
+	if err != nil || cookie.Value == "" {
+		ctx.Redirect("/authorize?error=session_expired", http.StatusFound)
+		return
+	}
+
+	session, err := h.sessionCache.GetSession(ctx, cookie.Value)
+	if err != nil || session == nil {
+		ctx.Redirect("/authorize?error=session_expired", http.StatusFound)
+		return
+	}
+
+	// 1. ลบ TOTP credentials ทั้งหมดของ user คนนี้
+	h.credRepo.DeleteAllByUserIDAndType(ctx, session.UserID, "totp")
+
+	// 2. เช็คว่ายังมี passkey เหลืออยุ่ไหม
+	passkeys, _ := h.credRepo.FindAllByUserIDAndType(ctx, session.UserID, "passkey")
+	if len(passkeys) == 0 {
+		// ถ้าไม่มี MFA method อื่นเลย ให้ปิด MFAEnabled ด้วย
+		h.userRepo.UpdateMFAEnabled(ctx, session.UserID, false)
+	}
+
+	ctx.Redirect("/account/sessions?success=mfa_disabled", http.StatusFound)
 }

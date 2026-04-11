@@ -111,10 +111,8 @@ func (ws *WebAuthnService) FinishRegistration(ctx context.Context, userID string
 		return fmt.Errorf("failed to save credential: %w", err)
 	}
 
-	// (Optional) Mark User as MFA enabled
-	if !user.MFAEnabled {
-		_ = ws.userRepo.UpdateMFAEnabled(ctx, user.ID, true)
-	}
+	// NOTE: Passkey is not TOTP-MFA. Do NOT set MFAEnabled here.
+	// MFAEnabled is only set to true when user enrolls TOTP Authenticator.
 
 	return nil
 }

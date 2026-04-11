@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"html/template"
 	"net/http"
 	"net/url"
 	"time"
@@ -145,7 +146,7 @@ func (h *MFAHandler) SetupUI(ctx *kp.Ctx) {
 	// สร้าง Secret สำหรับการ Setup
 	secret, qrUrl, err := h.oauthHandler.otpService.GenerateTOTP(ctx, user.ID, user.Username)
 	if err != nil {
-		ctx.Redirect("/account?error=setup_failed", http.StatusFound)
+		ctx.Redirect("/account/sessions?error=setup_failed", http.StatusFound)
 		return
 	}
 
@@ -156,11 +157,11 @@ func (h *MFAHandler) SetupUI(ctx *kp.Ctx) {
 	}, 10*time.Minute)
 
 	data := struct {
-		QRUrl  string
+		QRUrl  template.URL
 		Secret string
 		Error  string
 	}{
-		QRUrl:  qrUrl,
+		QRUrl:  template.URL(qrUrl),
 		Secret: secret,
 		Error:  ctx.Req.URL.Query().Get("error"),
 	}
@@ -220,5 +221,5 @@ func (h *MFAHandler) SetupSubmit(ctx *kp.Ctx) {
 	})
 
 	h.oauthHandler.transactionCache.DeleteTransaction(ctx, "mfa_setup:"+session.UserID)
-	ctx.Redirect("/account?success=mfa_enabled", http.StatusFound)
+	ctx.Redirect("/account/sessions?success=mfa_enabled", http.StatusFound)
 }

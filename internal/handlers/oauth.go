@@ -304,6 +304,14 @@ func (h *OAuthHandler) renderAuthPage(ctx *kp.Ctx, sid, tid, errMsg string) {
 	ctx.RenderTemplate("templates/auth.html", data)
 }
 
+func (h *OAuthHandler) findUserByUsernameOrEmail(ctx *kp.Ctx, identifier string) (*models.UserCredential, bool, error) {
+	if utils.IsEmail(identifier) {
+		result, err := h.userCredentialRepo.FindByEmailPassword(ctx, identifier)
+		return result, true, err
+	}
+	result, err := h.userCredentialRepo.FindByUsernamePassword(ctx, identifier)
+	return result, false, err
+}
 func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	ctx.Log("login", logger.MaskingOption{
 		MaskingField: "body.password",
@@ -329,8 +337,9 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 
 	username := ctx.Req.FormValue("username")
 	password := ctx.Req.FormValue("password")
+	// check if username is email format, if yes, find credential by email, otherwise by username
 
-	credential, err := h.userCredentialRepo.FindByUsernamePassword(ctx, username)
+	credential, isEmail, err := h.findUserByUsernameOrEmail(ctx, username)
 	if err != nil || credential == nil {
 		h.auditRepo.Save(ctx, &models.AuditLog{
 			UserID:     username, // Use username if ID unknown
@@ -355,6 +364,40 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 			Reason:     "password_incorrect",
 		})
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=invalid_credentials", http.StatusFound)
+		return
+	}
+
+	if isEmail {
+		// gen otp for email login and save to cache with 5 min TTL, then redirect to OTP verification page
+		exp := time.Now().Add(5 * time.Minute)
+		otpCode := utils.GenerateOTP(3)
+		credential := models.UserCredential{
+			UserID:     credential.UserID,
+			Type:       "otp",
+			Identifier: username,
+			Secret:     otpCode,
+			Verified:   false,
+			CreatedAt:  time.Now(),
+			LastUsedAt: time.Now(),
+			Revoked:    false,
+			ExpiresAt:  &exp,
+		}
+		if err := h.userCredentialRepo.Create(ctx, &credential); err != nil {
+			ctx.JsonError(&response.Error{
+				Err:     err,
+				Message: response.SystemError,
+			}, response.SystemError.Error())
+			return
+		}
+
+		// ส่ง OTP ผ่าน Email (จำลอง)
+		// render OTP page with OTP code for demo (ใน production ต้องส่ง email เท่านั้น)
+		ctx.RenderTemplate("templates/otp.html", map[string]any{
+			"SID":      sid,
+			"TID":      tid,
+			"Username": username,
+			"OTP":      otpCode, // For demo purposes, we show the OTP on the page
+		})
 		return
 	}
 
