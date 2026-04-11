@@ -50,8 +50,8 @@ func (r *AuditRepository) Save(ctx context.Context, audit *models.AuditLog) erro
 	return err
 }
 
-func (r *AuditRepository) FindByUserID(ctx context.Context, userID string, limit int64) ([]*models.AuditLog, error) {
-	opts := options.Find().SetSort(map[string]interface{}{"created_at": -1}).SetLimit(limit)
+func (r *AuditRepository) FindByUserID(ctx context.Context, userID string, limit, skip int64) ([]*models.AuditLog, error) {
+	opts := options.Find().SetSort(map[string]interface{}{"created_at": -1}).SetLimit(limit).SetSkip(skip)
 	cursor, err := r.col.Find(ctx, map[string]interface{}{"user_id": userID}, opts)
 	if err != nil {
 		return nil, err
@@ -63,4 +63,8 @@ func (r *AuditRepository) FindByUserID(ctx context.Context, userID string, limit
 		return nil, err
 	}
 	return logs, nil
+}
+
+func (r *AuditRepository) CountByUserID(ctx context.Context, userID string) (int64, error) {
+	return r.col.CountDocuments(ctx, map[string]interface{}{"user_id": userID})
 }

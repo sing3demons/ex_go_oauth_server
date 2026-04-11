@@ -165,6 +165,67 @@
         .back-link:hover {
             text-decoration: underline;
         }
+
+        .section-title {
+            margin: 40px 0 20px;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .section-title svg {
+            color: var(--primary);
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .activity-card {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .activity-info {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .activity-details p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .event-type {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-success { background: #10b981; box-shadow: 0 0 8px #10b981; }
+        .status-fail { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+        .status-logout { background: #94a3b8; }
     </style>
 </head>
 
@@ -205,6 +266,41 @@
                 <p>No active sessions found.</p>
             </div>
             {{ end }}
+        </div>
+
+        <div class="section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            Security History
+        </div>
+
+        <div class="history-list">
+            {{ range .History }}
+            <div class="activity-card">
+                <div class="activity-info">
+                    <div class="status-dot {{ if eq .Event "login_success" }}status-success{{ else if eq .Event "login_failed" }}status-fail{{ else }}status-logout{{ end }}"></div>
+                    <div class="activity-details">
+                        <div class="event-type">
+                            {{ if eq .Event "login_success" }}Login Successful{{ else if eq .Event "login_failed" }}Login Failed{{ else if eq .Event "logout" }}Signed Out{{ else }}{{ .Event }}{{ end }}
+                        </div>
+                        <p>{{ if .DeviceInfo }}{{ .DeviceInfo }}{{ else }}Unknown Device{{ end }} • IP: {{ .IPAddress }}</p>
+                        {{ if .Reason }}<p style="color: var(--danger); font-size: 0.8rem;">Reason: {{ .Reason }}</p>{{ end }}
+                    </div>
+                </div>
+                <div class="time" style="font-size: 0.85rem; color: var(--text-muted);">
+                    {{ .CreatedAt.Format "02 Jan, 15:04" }}
+                </div>
+            </div>
+            {{ else }}
+            <div class="empty-state" style="padding: 30px;">
+                <p>No recent activity found.</p>
+            </div>
+            {{ end }}
+        </div>
+
+        <div style="text-align: right; margin-top: 15px;">
+            <a href="/account/history" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; font-weight: 500;">
+                View All History →
+            </a>
         </div>
 
         <a href="/authorize" class="back-link">← Back to Services</a>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security History | OAuth</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #38bdf8;
+            --bg-dark: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --danger: #ef4444;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.1) 0%, transparent 40%),
+                radial-gradient(circle at 100% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 40%);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .header {
+            margin-bottom: 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        h1 {
+            font-size: 2.25rem;
+            font-weight: 700;
+            margin: 0 0 8px;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .activity-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: border-color 0.2s ease;
+        }
+
+        .activity-card:hover {
+            border-color: rgba(56, 189, 248, 0.3);
+        }
+
+        .activity-info {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .status-success { background: #10b981; box-shadow: 0 0 10px #10b981; }
+        .status-fail { background: #ef4444; box-shadow: 0 0 10px #ef4444; }
+        .status-logout { background: #94a3b8; }
+
+        .activity-details p {
+            margin: 4px 0 0;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .event-type {
+            font-weight: 600;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pagination {
+            margin-top: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .page-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 10px 20px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .page-btn:hover:not(.disabled) {
+            background: rgba(56, 189, 248, 0.1);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .page-btn.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .page-info {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .back-link {
+            margin-top: 40px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>Security History</h1>
+                <p class="subtitle">Complete audit trail of your account activities.</p>
+            </div>
+            <div class="page-info">
+                Total: {{ .TotalCounts }} events
+            </div>
+        </div>
+
+        <div class="history-list">
+            {{ range .History }}
+            <div class="activity-card">
+                <div class="activity-info">
+                    <div class="status-dot {{ if eq .Event "login_success" }}status-success{{ else if eq .Event "login_failed" }}status-fail{{ else }}status-logout{{ end }}"></div>
+                    <div class="activity-details">
+                        <div class="event-type">
+                            {{ if eq .Event "login_success" }}Login Successful{{ else if eq .Event "login_failed" }}Login Failed{{ else if eq .Event "logout" }}Signed Out{{ else }}{{ .Event }}{{ end }}
+                        </div>
+                        <p>{{ if .DeviceInfo }}{{ .DeviceInfo }}{{ else }}Unknown Device{{ end }} • IP: {{ .IPAddress }}</p>
+                        {{ if .Reason }}<p style="color: var(--danger); font-size: 0.85rem;">Reason: {{ .Reason }}</p>{{ end }}
+                    </div>
+                </div>
+                <div class="time" style="color: var(--text-muted); font-size: 0.95rem;">
+                    {{ .CreatedAt.Format "02 Jan 2006, 15:04" }}
+                </div>
+            </div>
+            {{ else }}
+            <div class="empty-state" style="text-align: center; padding: 60px; color: var(--text-muted);">
+                <p>No account activity found.</p>
+            </div>
+            {{ end }}
+        </div>
+
+        <div class="pagination">
+            <a href="/account/history?page={{ .PrevPage }}" class="page-btn {{ if not .HasPrev }}disabled{{ end }}">
+                ← Previous
+            </a>
+            <span class="page-info">Page {{ .Page }}</span>
+            <a href="/account/history?page={{ .NextPage }}" class="page-btn {{ if not .HasNext }}disabled{{ end }}">
+                Next →
+            </a>
+        </div>
+
+        <a href="/account/sessions" class="back-link">← Back to Sessions</a>
+    </div>
+
+</body>
+
+</html>
