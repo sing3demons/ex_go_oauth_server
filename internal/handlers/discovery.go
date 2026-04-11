@@ -36,6 +36,9 @@ func (h *DiscoveryHandler) OpenIDConfiguration(ctx *kp.Ctx) {
 		"token_endpoint_auth_methods_supported": h.cfg.GetArray("oidc.token_endpoint_auth_methods_supported"),
 		"claims_supported":                      h.cfg.GetArray("oidc.claims_supported"),
 		"code_challenge_methods_supported":      h.cfg.GetArray("oidc.code_challenge_methods_supported"),
+		"claims_parameter_supported":            true,
+		"request_parameter_supported":           true,
+		"request_uri_parameter_supported":       false,
 	}
 
 	ctx.JSON(http.StatusOK, discovery)
