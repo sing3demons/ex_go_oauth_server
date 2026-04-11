@@ -115,27 +115,22 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	for _, s := range h.cfg.Oidc.SupportedScopes {
 		serverScopesSet[s] = struct{}{}
 	}
-	var serverFilteredScopes []string
-	for _, s := range requestedScopes {
-		if _, ok := serverScopesSet[s]; ok {
-			serverFilteredScopes = append(serverFilteredScopes, s)
-		}
-	}
-	requestedScopes = serverFilteredScopes
-
-	// 3. ตรวจว่า Client อนุญาต Scopes ที่ขอไหม (client-level)
+	// 3. ตรวจว่า Client อนุญาต Scopes ที่ขอไหม (client-level) - กรองทิ้งแทน Error
 	allowedSet := make(map[string]struct{}, len(client.AllowedScopes))
 	for _, s := range client.AllowedScopes {
 		allowedSet[s] = struct{}{}
 	}
+
+	var finalScopes []string
 	for _, s := range requestedScopes {
-		if _, ok := allowedSet[s]; !ok {
-			return response.InvalidScope, &response.Error{
-				Err:     fmt.Errorf("scope '%s' is not allowed for this client", s),
-				Message: response.InvalidScope,
-			}
+		_, isServerSupported := serverScopesSet[s]
+		_, isClientAllowed := allowedSet[s]
+
+		if isServerSupported && isClientAllowed {
+			finalScopes = append(finalScopes, s)
 		}
 	}
+	requestedScopes = finalScopes
 	// PKCE Enforcement
 	codeChallenge := query.Get("code_challenge")
 	if (client.ClientType == "public" || client.RequirePKCE) && codeChallenge == "" {

@@ -244,26 +244,50 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		"expires_in":   3600,
 	}
 
-	// 7. จัดให้มี OIDC (ID Token) ด้วยมั้ย
+	// 7. OIDC (ID Token) & Refresh Token logic based on scopes
 	hasOpenID := false
-	hasEmail := false
-	hasProfile := false
 	hasOfflineAccess := false
-	scopeMap := map[string]bool{}
+	scopeMap := make(map[string]bool)
 	for _, scope := range info.Scopes {
+		scopeMap[scope] = true
 		if scope == "openid" {
 			hasOpenID = true
-		}
-		if scope == "email" {
-			hasEmail = true
-		}
-		if scope == "profile" {
-			hasProfile = true
 		}
 		if scope == "offline_access" {
 			hasOfflineAccess = true
 		}
-		scopeMap[scope] = true
+	}
+
+	if hasOpenID {
+		idClaims := jwt.MapClaims{
+			"iss": s.cfg.Issuer,
+			"sub": s.deriveSub(client, info.UserID),
+			"aud": clientID,
+			"exp": now.Add(1 * time.Hour).Unix(),
+			"iat": now.Unix(),
+		}
+
+		if info.Nonce != "" {
+			idClaims["nonce"] = info.Nonce
+		}
+
+		user, _ := s.userRepo.FindByID(ctx, info.UserID)
+		profile, _ := s.profileRepo.FindByID(ctx, info.UserID)
+
+		if user != nil {
+			if scopeMap["email"] {
+				idClaims["email"] = user.Email
+				idClaims["email_verified"] = true
+			}
+			if scopeMap["profile"] && profile != nil {
+				maps.Copy(idClaims, profile.BuildClaims(scopeMap))
+			}
+		}
+
+		idToken := jwt.NewWithClaims(signingMethod, idClaims)
+		idToken.Header["kid"] = keyMgr.KeyID
+		idTokenStr, _ := idToken.SignedString(keyMgr.PrivateKey)
+		response["id_token"] = idTokenStr
 	}
 
 	if hasOfflineAccess {
@@ -275,47 +299,13 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 			ClientID:  clientID,
 			UserID:    info.UserID,
 			Scopes:    info.Scopes,
-			ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+			ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 		}
 		s.rtRepo.Create(ctx, rt)
 		response["refresh_token"] = refreshTokenStr
 	}
 
-	if hasOpenID {
-		idClaims := jwt.MapClaims{
-			"iss": s.cfg.Issuer,
-			"sub": s.deriveSub(client, info.UserID),
-			"aud": clientID,
-			"exp": now.Add(1 * time.Hour).Unix(),
-			"iat": now.Unix(),
-		}
-		// ป้อน Nonce คืนเข้าไปเพื่อปิดกั้น CSRF Attack
-		if info.Nonce != "" {
-			idClaims["nonce"] = info.Nonce
-		}
-
-		// เติมข้อมูลตาม OIDC Standard Scopes
-		if hasEmail || hasProfile {
-			user, _ := s.userRepo.FindByID(ctx, info.UserID)
-			profile, _ := s.profileRepo.FindByID(ctx, info.UserID)
-			if profile != nil {
-				maps.Copy(idClaims, profile.BuildClaims(scopeMap))
-			}
-
-			if user != nil && hasEmail {
-				idClaims["email"] = user.Email
-				idClaims["email_verified"] = true
-			}
-		}
-
-		idToken := jwt.NewWithClaims(signingMethod, idClaims)
-		idToken.Header["kid"] = keyMgr.KeyID
-
-		idTokenStr, err := idToken.SignedString(keyMgr.PrivateKey)
-		if err == nil {
-			response["id_token"] = idTokenStr
-		}
-	}
+	response["scope"] = strings.Join(info.Scopes, " ")
 
 	return response, nil
 }
@@ -381,33 +371,40 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 		return nil, err
 	}
 
-	// Rotate refresh token
-	newRtBytes := make([]byte, 32)
-	rand.Read(newRtBytes)
-	newRefreshTokenStr := base64.URLEncoding.EncodeToString(newRtBytes)
-	newRt := &models.RefreshToken{
-		Token:     newRefreshTokenStr,
-		ClientID:  clientID,
-		UserID:    rt.UserID,
-		Scopes:    rt.Scopes,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // Reset window
-	}
-	s.rtRepo.Create(ctx, newRt)
-
 	response := map[string]any{
-		"access_token":  accessToken,
-		"refresh_token": newRefreshTokenStr,
-		"token_type":    "Bearer",
-		"expires_in":    3600,
+		"access_token": accessToken,
+		"token_type":   "Bearer",
+		"expires_in":   3600,
 	}
 
 	// ID Token
 	hasOpenID := false
+	hasOfflineAccess := false
 	for _, scope := range rt.Scopes {
 		if scope == "openid" {
 			hasOpenID = true
 		}
+		if scope == "offline_access" {
+			hasOfflineAccess = true
+		}
 	}
+
+	if hasOfflineAccess {
+		// Rotate refresh token
+		newRtBytes := make([]byte, 32)
+		rand.Read(newRtBytes)
+		newRefreshTokenStr := base64.URLEncoding.EncodeToString(newRtBytes)
+		newRt := &models.RefreshToken{
+			Token:     newRefreshTokenStr,
+			ClientID:  clientID,
+			UserID:    rt.UserID,
+			Scopes:    rt.Scopes,
+			ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // Reset window
+		}
+		s.rtRepo.Create(ctx, newRt)
+		response["refresh_token"] = newRefreshTokenStr
+	}
+
 	if hasOpenID {
 		idClaims := jwt.MapClaims{
 			"iss": s.cfg.Issuer,
