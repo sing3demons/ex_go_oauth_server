@@ -63,6 +63,9 @@
                 <label>Redirect URIs (comma separated)</label>
                 <textarea name="redirect_uris" placeholder="https://app.com/callback, https://test.app.com/callback" required></textarea>
 
+                <label>Post Logout Redirect URIs (comma separated)</label>
+                <textarea name="post_logout_redirect_uris" placeholder="https://app.com/logout-success, https://test.app.com/logout-success"></textarea>
+
                 <label>Allowed Scopes</label>
                 <div class="checkbox-group">
                     {{range .ScopesSupported}}
@@ -140,6 +143,7 @@
                         <th>Alg</th>
                         <th>Subject</th>
                         <th>Auth Method</th>
+                        <th>Logout URIs</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -188,6 +192,11 @@
                         </td>
                         <td>
                             <span class="badge" style="background:#343a40;color:white;">{{if .TokenEndpointAuthMethod}}{{.TokenEndpointAuthMethod}}{{else}}none{{end}}</span>
+                        </td>
+                        <td>
+                            {{range .PostLogoutRedirectURIs}}
+                                <div class="code-snippet" style="margin-bottom: 4px;">{{.}}</div>
+                            {{end}}
                         </td>
                     </tr>
                     {{else}}

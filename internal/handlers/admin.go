@@ -262,6 +262,15 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 		}
 	}
 
+	postLogoutRedirectURIsRaw := ctx.Req.FormValue("post_logout_redirect_uris")
+	var postLogoutRedirectURIs []string
+	for _, uri := range strings.Split(postLogoutRedirectURIsRaw, ",") {
+		cleanURI := strings.TrimSpace(uri)
+		if cleanURI != "" {
+			postLogoutRedirectURIs = append(postLogoutRedirectURIs, cleanURI)
+		}
+	}
+
 	clientType := ctx.Req.FormValue("client_type")
 	if clientType == "" {
 		clientType = "public"
@@ -344,6 +353,7 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 		IDTokenSignedResponseAlg: idTokenAlg,
 		SubjectType:              subjectType,
 		TokenEndpointAuthMethod:  authMethod,
+		PostLogoutRedirectURIs:   postLogoutRedirectURIs,
 	}
 
 	if err := h.clientRepo.Create(ctx.Req.Context(), client); err != nil {
