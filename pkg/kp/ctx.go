@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -630,7 +631,16 @@ func (c *Ctx) RenderTemplate(templateName string, data any) error {
 	c.log.SetDependencyMetadata(logger.LogDependencyMetadata{}) // Reset detail fields
 	summaryLogger := c.Context().Value(constants.SummaryLoggerKey).(*logger.SummaryLogger)
 
-	tmpl, err := template.ParseFiles(templateName)
+	tmpl, err := template.New(templateName).Funcs(template.FuncMap{
+		"contains": strings.Contains,
+		"substr": func(s string, start, end int) string {
+			if len(s) < end {
+				return s[start:]
+			}
+			return s[start:end]
+		},
+		"upper": strings.ToUpper,
+	}).ParseFiles(templateName)
 	if err != nil {
 		summaryLogger.FlushError(&response.Error{
 			Message: response.SystemError,
@@ -639,7 +649,8 @@ func (c *Ctx) RenderTemplate(templateName string, data any) error {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	res := tmpl.Execute(c.Res, data)
+	// 🏮 ParseFiles parses only the first file as the name, we need to match it
+	res := tmpl.ExecuteTemplate(c.Res, filepath.Base(templateName), data)
 	if res != nil {
 		summaryLogger.FlushError(&response.Error{
 			Message: response.SystemError,

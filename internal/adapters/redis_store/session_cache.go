@@ -43,9 +43,10 @@ func (c *SessionCache) SetSession(ctx context.Context, sessionID string, info *m
 		return err
 	}
 
+	// 1. Store the session data
 	result := c.client.Set(ctx, key, data, ttl).Err()
-	end := time.Since(start).Microseconds()
 	if result != nil {
+		end := time.Since(start).Microseconds()
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   "redis",
 			ResponseTime: end,
@@ -56,6 +57,12 @@ func (c *SessionCache) SetSession(ctx context.Context, sessionID string, info *m
 		return result
 	}
 
+	// 2. Add to User Session Index (Set)
+	userSessionsKey := "user:sessions:" + info.UserID
+	c.client.SAdd(ctx, userSessionsKey, sessionID)
+	c.client.Expire(ctx, userSessionsKey, ttl) // Keep index alive as long as potential sessions
+
+	end := time.Since(start).Microseconds()
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency:   "redis",
 		ResponseTime: end,
@@ -125,7 +132,20 @@ func (c *SessionCache) DeleteSession(ctx context.Context, sessionID string) erro
 	}).Debug(logAction.DB_REQUEST(logAction.DB_DELETE, "app -> redis"), map[string]any{
 		"key": key,
 	})
-	err := c.client.Del(ctx, key).Err()
+
+	// 1. Get session info to find UserID first (if we don't have it)
+	val, err := c.client.Get(ctx, key).Result()
+	if err == nil {
+		var info models.SessionInfo
+		if json.Unmarshal([]byte(val), &info) == nil {
+			// 2. Remove from User Session Index
+			userSessionsKey := "user:sessions:" + info.UserID
+			c.client.SRem(ctx, userSessionsKey, sessionID)
+		}
+	}
+
+	// 3. Delete the session key
+	err = c.client.Del(ctx, key).Err()
 	end := time.Since(start).Microseconds()
 	if err != nil {
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
@@ -145,4 +165,24 @@ func (c *SessionCache) DeleteSession(ctx context.Context, sessionID string) erro
 		"result": "deleted",
 	})
 	return nil
+}
+
+func (c *SessionCache) GetUserSessions(ctx context.Context, userID string) ([]*models.SessionInfo, error) {
+	userSessionsKey := "user:sessions:" + userID
+	sids, err := c.client.SMembers(ctx, userSessionsKey).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var sessions []*models.SessionInfo
+	for _, sid := range sids {
+		session, err := c.GetSession(ctx, sid)
+		if err == nil && session != nil {
+			sessions = append(sessions, session)
+		} else {
+			// Cleanup stale indices if session is gone
+			c.client.SRem(ctx, userSessionsKey, sid)
+		}
+	}
+	return sessions, nil
 }

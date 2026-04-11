@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Sessions | OAuth</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #38bdf8;
+            --bg-dark: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --danger: #ef4444;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.1) 0%, transparent 40%),
+                radial-gradient(circle at 100% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 40%);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .header {
+            margin-bottom: 40px;
+            text-align: left;
+        }
+
+        h1 {
+            font-size: 2.25rem;
+            font-weight: 700;
+            margin: 0 0 8px;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .sessions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .session-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .session-card:hover {
+            border-color: rgba(56, 189, 248, 0.3);
+        }
+
+        .session-card.current {
+            border: 1px solid rgba(56, 189, 248, 0.5);
+            background: rgba(56, 189, 248, 0.05);
+        }
+
+        .session-info {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .device-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .details h3 {
+            margin: 0 0 4px;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .details p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-left: 8px;
+        }
+
+        .badge-current {
+            background: rgba(56, 189, 248, 0.2);
+            color: #38bdf8;
+        }
+
+        .revoke-btn {
+            background: transparent;
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .revoke-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-muted);
+        }
+
+        .back-link {
+            margin-top: 40px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="header">
+            <h1>Active Sessions</h1>
+            <p class="subtitle">Management and security of your active accounts on different devices.</p>
+        </div>
+
+        <div class="sessions-list">
+            {{ $currentSID := .CurrentSID }}
+            {{ range .Sessions }}
+            <div class="session-card {{ if eq .SID $currentSID }}current{{ end }}">
+                <div class="session-info">
+                    <div class="device-icon">
+                        {{ if contains .DeviceInfo "Windows" }}💻{{ else if contains .DeviceInfo "Mac" }}💻{{ else if contains .DeviceInfo "Linux" }}🐧{{ else if contains .DeviceInfo "iPhone" }}📱{{ else if contains .DeviceInfo "Android" }}📱{{ else }}🌐{{ end }}
+                    </div>
+                    <div class="details">
+                        <h3>
+                            {{ .DeviceInfo }}
+                            {{ if eq .SID $currentSID }}<span class="badge badge-current">This Device</span>{{ end }}
+                        </h3>
+                        <p>IP: {{ .IPAddress }} • Last active: {{ .LastActivityAt.Format "02 Jan 2006, 15:04" }}</p>
+                    </div>
+                </div>
+
+                <form method="POST" action="/account/sessions/revoke">
+                    <input type="hidden" name="sid" value="{{ .SID }}">
+                    <button type="submit" class="revoke-btn">
+                        {{ if eq .SID $currentSID }}Sign Out{{ else }}Revoke Access{{ end }}
+                    </button>
+                </form>
+            </div>
+            {{ else }}
+            <div class="empty-state">
+                <p>No active sessions found.</p>
+            </div>
+            {{ end }}
+        </div>
+
+        <a href="/authorize" class="back-link">← Back to Services</a>
+    </div>
+
+</body>
+
+</html>

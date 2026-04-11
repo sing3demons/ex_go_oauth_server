@@ -69,11 +69,15 @@ func main() {
 	app.GET("/jwks.json", discoveryHandler.JWKS)
 
 	oauthHandler := handlers.NewOAuthHandler(cfg, oauthService, userRepo, credentialRepo, profileRepo, clientRepo, sessionCache, transactionCache)
+	accountHandler := handlers.NewAccountHandler(sessionCache)
+
 	app.GET("/authorize", oauthHandler.Authorize)
 	app.POST("/login", oauthHandler.LoginSubmit, middleware.RateLimitMiddleware(rateLimitCache, 5, 1*time.Minute))
 	app.POST("/register", oauthHandler.RegisterSubmit)
 	app.GET("/consent", oauthHandler.ConsentUI)
 	app.POST("/consent", oauthHandler.ConsentSubmit)
+	app.GET("/account/sessions", accountHandler.SessionsUI)
+	app.POST("/account/sessions/revoke", accountHandler.RevokeSession)
 	app.POST("/token", oauthHandler.Token)
 	app.GET("/userinfo", oauthHandler.UserInfo)
 	app.POST("/userinfo", oauthHandler.UserInfo)

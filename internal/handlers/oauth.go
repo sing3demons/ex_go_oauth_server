@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mssola/user_agent"
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
@@ -331,9 +332,19 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		return
 	}
 
+	ua := user_agent.New(ctx.Req.UserAgent())
+	browser, version := ua.Browser()
+	os := ua.OS()
+	deviceInfo := fmt.Sprintf("%s (%s %s)", os, browser, version)
+
 	sessionInfo := &models.SessionInfo{
-		UserID:     credential.UserID,
-		LoggedInAt: time.Now(),
+		SID:            sid,
+		UserID:         credential.UserID,
+		LoggedInAt:     time.Now(),
+		LastActivityAt: time.Now(),
+		IPAddress:      ctx.Req.RemoteAddr,
+		UserAgent:      ctx.Req.UserAgent(),
+		DeviceInfo:     deviceInfo,
 	}
 	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
 

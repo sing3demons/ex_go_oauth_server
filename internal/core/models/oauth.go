@@ -25,6 +25,11 @@ type AuthCodeInfo struct {
 }
 
 type SessionInfo struct {
-	UserID     string    `json:"user_id"`
-	LoggedInAt time.Time `json:"logged_in_at"`
+	SID            string    `json:"sid"`
+	UserID         string    `json:"user_id"`
+	LoggedInAt     time.Time `json:"logged_in_at"`
+	LastActivityAt time.Time `json:"last_activity_at"`
+	IPAddress      string    `json:"ip_address"`
+	UserAgent      string    `json:"user_agent"`
+	DeviceInfo     string    `json:"device_info"` // e.g. "Chrome on Windows"
 }
