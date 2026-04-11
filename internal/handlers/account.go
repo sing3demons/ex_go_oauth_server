@@ -62,18 +62,24 @@ func (h *AccountHandler) SessionsUI(ctx *kp.Ctx) {
 	creds, _ := h.credRepo.FindAllByUserIDAndType(ctx, session.UserID, "passkey")
 	passkeysCount := len(creds)
 
+	// 7. Get TOTP count
+	totpCreds, _ := h.credRepo.FindAllByUserIDAndType(ctx, session.UserID, "totp")
+	totpEnabled := len(totpCreds) > 0
+
 	data := struct {
 		CurrentSID    string
 		Sessions      any
 		History       any
 		MFAEnabled    bool
 		PasskeysCount int
+		TotpEnabled   bool
 	}{
 		CurrentSID:    sid,
 		Sessions:      allSessions,
 		History:       history,
 		MFAEnabled:    mfaEnabled,
 		PasskeysCount: passkeysCount,
+		TotpEnabled:   totpEnabled,
 	}
 
 	ctx.RenderTemplate("templates/account_sessions.html", data)

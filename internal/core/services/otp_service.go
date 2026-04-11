@@ -1,8 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"image/png"
 	"time"
 
 	"github.com/pquerna/otp/totp"
@@ -31,7 +34,20 @@ func (s *OTPService) GenerateTOTP(ctx context.Context, userID, accountName strin
 		return "", "", err
 	}
 
-	return key.Secret(), key.URL(), nil
+	img, err := key.Image(200, 200)
+	if err != nil {
+		return "", "", err
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return "", "", err
+	}
+
+	base64Data := base64.StdEncoding.EncodeToString(buf.Bytes())
+	dataURL := "data:image/png;base64," + base64Data
+
+	return key.Secret(), dataURL, nil
 }
 
 // VerifyOTP ตรวจสอบรหัส 6 หลัก

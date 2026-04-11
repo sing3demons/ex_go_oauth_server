@@ -3,7 +3,6 @@
 
 <head>
     <meta charset="UTF-8">
-    <script>alert("HEAD SCRIPT EXECUTED!");</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manage Sessions | OAuth</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -244,10 +243,10 @@
                 </div>
                 <div class="details">
                     <h3>TOTP Authenticator</h3>
-                    <p>Status: <span style="color: {{ if .MFAEnabled }}#10b981{{ else }}#ef4444{{ end }}; font-weight: 600;">{{ if .MFAEnabled }}Enabled{{ else }}Disabled{{ end }}</span></p>
+                    <p>Status: <span style="color: {{ if .TotpEnabled }}#10b981{{ else }}#ef4444{{ end }}; font-weight: 600;">{{ if .TotpEnabled }}Enabled{{ else }}Disabled{{ end }}</span></p>
                 </div>
             </div>
-            {{ if not .MFAEnabled }}
+            {{ if not .TotpEnabled }}
             <a href="/mfa/setup" class="revoke-btn" style="text-decoration: none; border-color: var(--primary); color: var(--primary);">
                 Enable MFA
             </a>
