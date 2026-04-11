@@ -114,6 +114,7 @@ func main() {
 	// 	log.Fatalf("Server failed: %v", err)
 	// }
 
+	app.Use(middleware.SecurityHeadersMiddleware)
 	app.Use(func(next http.Handler) http.Handler {
 		return middleware.LoggerMiddleware(next, cfg, detailSlogAdapter, summarySlogAdapter, maskingSvc)
 	})
