@@ -1,14 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authorize App</title>
+    <title>Authorize Access | {{ .ClientName }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --primary: #38bdf8;
+            --primary-hover: #0ea5e9;
+            --bg-dark: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --accent-success: #10b981;
+        }
+
         body {
-            background-color: #0f172a;
-            color: #f1f5f9;
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 50%);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -16,115 +34,217 @@
             margin: 0;
             padding: 20px;
         }
+
         .consent-card {
-            background: rgba(30, 41, 59, 0.7);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            padding: 40px;
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 48px;
             width: 100%;
-            max-width: 420px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            max-width: 480px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .client-info {
             text-align: center;
-        }
-        h2 {
-            margin-top: 0;
-            margin-bottom: 8px;
-            font-size: 1.5rem;
-            color: #38bdf8;
-        }
-        p.subtitle {
-            color: #94a3b8;
-            font-size: 0.95rem;
-            margin-bottom: 24px;
-        }
-        .scopes-list {
-            text-align: left;
-            background: rgba(15, 23, 42, 0.5);
-            border-radius: 8px;
-            padding: 16px;
             margin-bottom: 32px;
         }
-        .scopes-list strong {
-            display: block;
-            margin-bottom: 12px;
-            color: #e2e8f0;
+
+        .client-avatar {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+            border-radius: 20px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: 700;
+            color: white;
+            box-shadow: 0 8px 16px rgba(56, 189, 248, 0.3);
         }
-        .scopes-list ul {
-            list-style: none;
-            padding: 0;
+
+        h2 {
+            margin: 0 0 8px;
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 1rem;
             margin: 0;
         }
-        .scopes-list li {
-            position: relative;
-            padding-left: 24px;
-            margin-bottom: 8px;
-            color: #cbd5e1;
+
+        .scopes-container {
+            text-align: left;
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+
+        .scopes-container strong {
+            display: block;
+            margin-bottom: 16px;
+            color: var(--text-main);
             font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            opacity: 0.8;
         }
-        .scopes-list li::before {
-            content: '✓';
-            position: absolute;
-            left: 0;
-            color: #10b981;
-            font-weight: bold;
+
+        .scope-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
         }
+
+        .scope-item:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .scope-icon {
+            color: var(--accent-success);
+            font-size: 18px;
+            margin-top: 2px;
+        }
+
+        .scope-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .scope-title {
+            color: var(--text-main);
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .scope-desc {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
         .btn-group {
             display: flex;
-            gap: 12px;
+            gap: 16px;
         }
+
         button {
             flex: 1;
-            padding: 12px;
+            padding: 14px;
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
             font-size: 1rem;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
+
         button.allow {
-            background-color: #3b82f6;
+            background: linear-gradient(to right, #38bdf8, #6366f1);
             color: white;
+            box-shadow: 0 4px 12px rgba(56, 189, 248, 0.2);
         }
+
         button.allow:hover {
-            background-color: #2563eb;
-            transform: translateY(-1px);
+            transform: translateY(-2px);
+            filter: brightness(1.1);
+            box-shadow: 0 8px 20px rgba(56, 189, 248, 0.3);
         }
+
         button.deny {
-            background-color: transparent;
-            color: #94a3b8;
-            border: 1px solid #475569;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
         }
+
         button.deny:hover {
-            background-color: rgba(71, 85, 105, 0.2);
-            color: #f1f5f9;
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .footer {
+            margin-top: 32px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
         }
     </style>
 </head>
+
 <body>
 
     <div class="consent-card">
-        <h2>{{ .ClientName }}</h2>
-        <p class="subtitle">wants to access your account</p>
+        <div class="client-info">
+            <div class="client-avatar">
+                {{ substr .ClientName 0 1 | upper }}
+            </div>
+            <h2>{{ .ClientName }}</h2>
+            <p class="subtitle">Requests access to your account</p>
+        </div>
 
-        <div class="scopes-list">
-            <strong>Requested Permissions:</strong>
-            <ul>
-                {{ range .Scopes }}
+        <div class="scopes-container">
+            <strong>Requested Permissions</strong>
+            
+            {{ range .Scopes }}
+            <div class="scope-item">
+                <div class="scope-icon">✓</div>
+                <div class="scope-details">
                     {{ if eq . "openid" }}
-                        <li>Verify your identity</li>
+                        <span class="scope-title">OpenID Connect</span>
+                        <span class="scope-desc">Authenticate and verify your identity</span>
                     {{ else if eq . "profile" }}
-                        <li>View your basic profile information</li>
+                        <span class="scope-title">Profile Data</span>
+                        <span class="scope-desc">Access to your name, photo, and gender</span>
                     {{ else if eq . "email" }}
-                        <li>View your email address</li>
+                        <span class="scope-title">Email Address</span>
+                        <span class="scope-desc">View your primary email address</span>
+                    {{ else if eq . "phone" }}
+                        <span class="scope-title">Phone Number</span>
+                        <span class="scope-desc">View your verified phone number</span>
+                    {{ else if eq . "address" }}
+                        <span class="scope-title">Address</span>
+                        <span class="scope-desc">Access your physical mailing address</span>
                     {{ else if eq . "offline_access" }}
-                        <li>Access your data when you're not actively using the app</li>
+                        <span class="scope-title">Offline Access</span>
+                        <span class="scope-desc">Keep you logged in even when you're not using the app</span>
                     {{ else }}
-                        <li>Access your {{ . }}</li>
+                        <span class="scope-title">{{ . }}</span>
+                        <span class="scope-desc">Access to your {{ . }} information</span>
                     {{ end }}
-                {{ end }}
-            </ul>
+                </div>
+            </div>
+            {{ end }}
         </div>
 
         <form method="POST" action="/consent">
@@ -135,7 +255,12 @@
                 <button type="submit" name="action" value="allow" class="allow">Allow Access</button>
             </div>
         </form>
+
+        <div class="footer">
+            By clicking Allow, you agree to let <strong>{{ .ClientName }}</strong> use your information in accordance with their <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.
+        </div>
     </div>
 
 </body>
+
 </html>
