@@ -72,7 +72,7 @@ func main() {
 	app.GET("/.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	app.GET("/jwks.json", discoveryHandler.JWKS)
 
-	oauthHandler := handlers.NewOAuthHandler(cfg, clientRepo, userRepo, authCodeCache, oauthService, credentialRepo, sessionCache, transactionCache, auditRepo)
+	oauthHandler := handlers.NewOAuthHandler(cfg, clientRepo, userRepo, profileRepo, authCodeCache, oauthService, credentialRepo, sessionCache, transactionCache, auditRepo)
 	accountHandler := handlers.NewAccountHandler(sessionCache, auditRepo)
 
 	app.GET("/authorize", oauthHandler.Authorize)

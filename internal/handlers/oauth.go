@@ -37,11 +37,12 @@ type OAuthHandler struct {
 	cfg                *config.Config
 }
 
-func NewOAuthHandler(cfg *config.Config, clientRepo *mongo_store.ClientRepository, userRepo *mongo_store.UserRepository, authCodeCache *redis_store.AuthCodeCache, oauthService *services.OAuthService, userCredentialRepo *mongo_store.UserCredentialRepository, sessionCache *redis_store.SessionCache, transactionCache *redis_store.TransactionCache, auditRepo *mongo_store.AuditRepository) *OAuthHandler {
+func NewOAuthHandler(cfg *config.Config, clientRepo *mongo_store.ClientRepository, userRepo *mongo_store.UserRepository, userProfileRepo *mongo_store.UserProfileRepository, authCodeCache *redis_store.AuthCodeCache, oauthService *services.OAuthService, userCredentialRepo *mongo_store.UserCredentialRepository, sessionCache *redis_store.SessionCache, transactionCache *redis_store.TransactionCache, auditRepo *mongo_store.AuditRepository) *OAuthHandler {
 	return &OAuthHandler{
 		cfg:                cfg,
 		clientRepo:         clientRepo,
 		userRepo:           userRepo,
+		userProfileRepo:    userProfileRepo,
 		oauthService:       oauthService,
 		userCredentialRepo: userCredentialRepo,
 		sessionCache:       sessionCache,
