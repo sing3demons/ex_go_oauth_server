@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/sing3demons/oauth_server/internal/adapters/mongo_store"
 	"github.com/sing3demons/oauth_server/internal/adapters/redis_store"
+	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/pkg/kp"
 )
 
@@ -139,7 +141,8 @@ func (h *AccountHandler) HistoryUI(ctx *kp.Ctx) {
 	// 4. Get logs and total count
 	history, err := h.auditRepo.FindByUserID(ctx, session.UserID, limit, skip)
 	if err != nil {
-		history = nil
+		log.Printf("failed to fetch audit history for user %s: %v", session.UserID, err)
+		history = []*models.AuditLog{}
 	}
 	total, _ := h.auditRepo.CountByUserID(ctx, session.UserID)
 
