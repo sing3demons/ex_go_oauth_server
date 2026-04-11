@@ -55,6 +55,7 @@ type Ctx struct {
 	sessionId     string
 	transactionId string
 	bodyBytes     []byte
+	bodyMap       map[string]any
 	tmpMgr        *TemplateManager
 }
 
@@ -78,6 +79,7 @@ func (c *Ctx) Reset(r *http.Request, w http.ResponseWriter, cfg *config.Config, 
 	c.sessionId = ""
 	c.transactionId = ""
 	c.bodyBytes = nil
+	c.bodyMap = nil
 	c.tmpMgr = tmpMgr
 }
 
@@ -95,9 +97,15 @@ func ReleaseCtx(c *Ctx) {
 }
 func (c *Ctx) Log(cmd string, maskOptions ...logger.MaskingOption) *logger.CustomLogger {
 	c.cmd = cmd
-	// copy body
-	body := make(map[string]any)
-	c.Bind(&body)
+
+	// ✅ Lazy parse body into map if not already done
+	if c.bodyMap == nil {
+		body := make(map[string]any)
+		if err := c.Bind(&body); err == nil {
+			c.bodyMap = body
+		}
+	}
+	body := c.bodyMap
 
 	// Restore body for subsequent reads (e.g., FormValue, Bind)
 	incoming := map[string]any{
@@ -290,10 +298,30 @@ func (c *Ctx) Bind(v any) error {
 	}
 
 	// Parse based on content type using cached byte array
-	switch ContentType(baseContentType) {
-	case ContentTypeJSON:
-		return c.parseJSON(c.bodyBytes, v)
+	ctype := ContentType(baseContentType)
+	if ctype == ContentTypeJSON {
+		// ✅ Optimization: if already parsed into map, just copy it
+		if c.bodyMap != nil {
+			if m, ok := v.(*map[string]any); ok {
+				*m = c.bodyMap
+				return nil
+			}
+		}
 
+		err := c.parseJSON(c.bodyBytes, v)
+		if err == nil && c.bodyMap == nil {
+			// Cache the map for future use if v is a map
+			if m, ok := v.(*map[string]any); ok {
+				c.bodyMap = *m
+			} else {
+				// If v is a struct, we could optionally parse into a map too, 
+				// but let's keep it simple and only cache if a map is requested.
+			}
+		}
+		return err
+	}
+
+	switch ctype {
 	case ContentTypeXML:
 		return c.parseXML(c.bodyBytes, v)
 

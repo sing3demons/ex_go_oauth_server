@@ -123,10 +123,17 @@ func main() {
 	// 	log.Fatalf("Server failed: %v", err)
 	// }
 
+	app.Use(middleware.GzipMiddleware)
 	app.Use(middleware.SecurityHeadersMiddleware)
 	app.Use(func(next http.Handler) http.Handler {
 		return middleware.LoggerMiddleware(next, cfg, detailSlogAdapter, summarySlogAdapter, maskingSvc)
 	})
 	app.Use(handlers.CORSMiddleware())
 	app.Start()
+
+	// หลังจาก app.Start() (ซึ่งจะรอสัญญาณ Interrupt คืนมา)
+	log.Println("Closing database connections...")
+	mongoClient.Disconnect(context.Background())
+	redisClient.Close()
+	log.Println("Cleanup complete.")
 }
