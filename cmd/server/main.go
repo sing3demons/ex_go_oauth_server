@@ -45,11 +45,12 @@ func main() {
 	userRepo := mongo_store.NewUserRepository(db)
 	clientRepo := mongo_store.NewClientRepository(db, redisClient)
 	authCodeCache := redis_store.NewAuthCodeCache(redisClient)
-	sessionCache := redis_store.NewSessionCache(redisClient)
-	transactionCache := redis_store.NewTransactionCache(redisClient)
-	credentialRepo := mongo_store.NewUserCredentialRepository(db)
 	profileRepo := mongo_store.NewUserProfileRepository(db)
 	rateLimitCache := redis_store.NewRateLimitCache(redisClient)
+	auditRepo := mongo_store.NewAuditRepository(db)
+	sessionCache := redis_store.NewSessionCache(redisClient)
+	credentialRepo := mongo_store.NewUserCredentialRepository(db)
+	transactionCache := redis_store.NewTransactionCache(redisClient)
 
 	// Init Core Key Service
 	rtRepo := mongo_store.NewRefreshTokenRepository(db)
@@ -71,7 +72,7 @@ func main() {
 	app.GET("/.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	app.GET("/jwks.json", discoveryHandler.JWKS)
 
-	oauthHandler := handlers.NewOAuthHandler(cfg, oauthService, userRepo, credentialRepo, profileRepo, clientRepo, sessionCache, transactionCache)
+	oauthHandler := handlers.NewOAuthHandler(cfg, clientRepo, userRepo, authCodeCache, oauthService, credentialRepo, sessionCache, transactionCache, auditRepo)
 	accountHandler := handlers.NewAccountHandler(sessionCache)
 
 	app.GET("/authorize", oauthHandler.Authorize)

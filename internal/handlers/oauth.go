@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mssola/user_agent"
+	"github.com/sing3demons/oauth_server/internal/adapters/mongo_store"
+	"github.com/sing3demons/oauth_server/internal/adapters/redis_store"
 	"github.com/sing3demons/oauth_server/internal/config"
 	"github.com/sing3demons/oauth_server/internal/core/models"
 	"github.com/sing3demons/oauth_server/internal/core/ports"
@@ -29,21 +31,22 @@ type OAuthHandler struct {
 	userCredentialRepo ports.UserCredentialRepository
 	userProfileRepo    ports.UserProfileRepository
 	clientRepo         ports.ClientRepository
-	sessionCache       ports.SessionCache
-	transactionCache   ports.TransactionCache
+	sessionCache       *redis_store.SessionCache
+	transactionCache   *redis_store.TransactionCache
+	auditRepo          *mongo_store.AuditRepository
 	cfg                *config.Config
 }
 
-func NewOAuthHandler(cfg *config.Config, oauthService *services.OAuthService, userRepo ports.UserRepository, userCredentialRepo ports.UserCredentialRepository, userProfileRepo ports.UserProfileRepository, clientRepo ports.ClientRepository, sessionCache ports.SessionCache, transactionCache ports.TransactionCache) *OAuthHandler {
+func NewOAuthHandler(cfg *config.Config, clientRepo *mongo_store.ClientRepository, userRepo *mongo_store.UserRepository, authCodeCache *redis_store.AuthCodeCache, oauthService *services.OAuthService, userCredentialRepo *mongo_store.UserCredentialRepository, sessionCache *redis_store.SessionCache, transactionCache *redis_store.TransactionCache, auditRepo *mongo_store.AuditRepository) *OAuthHandler {
 	return &OAuthHandler{
-		oauthService:       oauthService,
-		userRepo:           userRepo,
-		userCredentialRepo: userCredentialRepo,
-		userProfileRepo:    userProfileRepo,
+		cfg:                cfg,
 		clientRepo:         clientRepo,
+		userRepo:           userRepo,
+		oauthService:       oauthService,
+		userCredentialRepo: userCredentialRepo,
 		sessionCache:       sessionCache,
 		transactionCache:   transactionCache,
-		cfg:                cfg,
+		auditRepo:          auditRepo,
 	}
 }
 
@@ -320,14 +323,28 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 
 	credential, err := h.userCredentialRepo.FindByUsernamePassword(ctx, username)
 	if err != nil || credential == nil {
-		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
+		h.auditRepo.Save(ctx, &models.AuditLog{
+			UserID:     username, // Use username if ID unknown
+			Event:      "login_failed",
+			IPAddress:  ctx.Req.RemoteAddr,
+			UserAgent:  ctx.Req.UserAgent(),
+			DeviceInfo: ctx.Req.UserAgent(), // Raw for now, parser later
+			Reason:     "user_not_found",
+		})
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=invalid_credentials", http.StatusFound)
 		return
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(credential.Secret), []byte(password))
 	if err != nil {
-		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Invalid+credentials", http.StatusFound)
+		h.auditRepo.Save(ctx, &models.AuditLog{
+			UserID:     credential.UserID,
+			Event:      "login_failed",
+			IPAddress:  ctx.Req.RemoteAddr,
+			UserAgent:  ctx.Req.UserAgent(),
+			DeviceInfo: ctx.Req.UserAgent(),
+			Reason:     "password_incorrect",
+		})
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=invalid_credentials", http.StatusFound)
 		return
 	}
@@ -336,6 +353,14 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	browser, version := ua.Browser()
 	os := ua.OS()
 	deviceInfo := fmt.Sprintf("%s (%s %s)", os, browser, version)
+
+	h.auditRepo.Save(ctx, &models.AuditLog{
+		UserID:     credential.UserID,
+		Event:      "login_success",
+		IPAddress:  ctx.Req.RemoteAddr,
+		UserAgent:  ctx.Req.UserAgent(),
+		DeviceInfo: deviceInfo,
+	})
 
 	sessionInfo := &models.SessionInfo{
 		SID:            sid,
@@ -968,7 +993,17 @@ func (h *OAuthHandler) Logout(ctx *kp.Ctx) {
 	if cookie, err := ctx.Req.Cookie("oidc_session"); err == nil {
 		sid := cookie.Value
 		if sid != "" {
-			h.sessionCache.DeleteSession(ctx, sid)
+			// บันทึก Logout ใน Audit Log
+			if session, err := h.sessionCache.GetSession(ctx, cookie.Value); err == nil {
+				h.auditRepo.Save(ctx, &models.AuditLog{
+					UserID:    session.UserID,
+					Event:     "logout",
+					IPAddress: ctx.Req.RemoteAddr,
+					UserAgent: ctx.Req.UserAgent(),
+				})
+			}
+
+			h.sessionCache.DeleteSession(ctx, cookie.Value)
 		}
 	}
 
