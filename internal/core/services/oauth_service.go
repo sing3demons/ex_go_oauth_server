@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 	"time"
@@ -225,6 +227,7 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		"exp":    now.Add(1 * time.Hour).Unix(),
 		"iat":    now.Unix(),
 		"scopes": info.Scopes,
+		"uid":    s.EncryptUserID(info.UserID), // Encrypted internal ID for privacy
 	}
 	atToken := jwt.NewWithClaims(signingMethod, atClaims)
 	atToken.Header["kid"] = keyMgr.KeyID
@@ -234,31 +237,18 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		return nil, err
 	}
 
-	// 5.5 Generate Refresh Token
-	rtBytes := make([]byte, 32)
-	rand.Read(rtBytes)
-	refreshTokenStr := base64.URLEncoding.EncodeToString(rtBytes)
-	rt := &models.RefreshToken{
-		Token:     refreshTokenStr,
-		ClientID:  clientID,
-		UserID:    info.UserID,
-		Scopes:    info.Scopes,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
-	}
-	s.rtRepo.Create(ctx, rt)
-
 	// 6. เตรียมส่งกลับ
 	response := map[string]any{
-		"access_token":  accessToken,
-		"refresh_token": refreshTokenStr,
-		"token_type":    "Bearer",
-		"expires_in":    3600,
+		"access_token": accessToken,
+		"token_type":   "Bearer",
+		"expires_in":   3600,
 	}
 
 	// 7. จัดให้มี OIDC (ID Token) ด้วยมั้ย
 	hasOpenID := false
 	hasEmail := false
 	hasProfile := false
+	hasOfflineAccess := false
 	scopeMap := map[string]bool{}
 	for _, scope := range info.Scopes {
 		if scope == "openid" {
@@ -270,7 +260,25 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		if scope == "profile" {
 			hasProfile = true
 		}
+		if scope == "offline_access" {
+			hasOfflineAccess = true
+		}
 		scopeMap[scope] = true
+	}
+
+	if hasOfflineAccess {
+		rtBytes := make([]byte, 32)
+		rand.Read(rtBytes)
+		refreshTokenStr := base64.URLEncoding.EncodeToString(rtBytes)
+		rt := &models.RefreshToken{
+			Token:     refreshTokenStr,
+			ClientID:  clientID,
+			UserID:    info.UserID,
+			Scopes:    info.Scopes,
+			ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+		}
+		s.rtRepo.Create(ctx, rt)
+		response["refresh_token"] = refreshTokenStr
 	}
 
 	if hasOpenID {
@@ -290,19 +298,13 @@ func (s *OAuthService) ExchangeToken(ctx context.Context, code, clientID, client
 		if hasEmail || hasProfile {
 			user, _ := s.userRepo.FindByID(ctx, info.UserID)
 			profile, _ := s.profileRepo.FindByID(ctx, info.UserID)
+			if profile != nil {
+				maps.Copy(idClaims, profile.BuildClaims(scopeMap))
+			}
 
-			if user != nil {
-				if hasEmail {
-					idClaims["email"] = user.Email
-					idClaims["email_verified"] = true
-				}
-				// if hasProfile && profile != nil {
-				// idClaims["preferred_username"] = user.Username
-				// idClaims["name"] = user.Username // mock using username as default name
-				// }
-				if profile != nil {
-					maps.Copy(idClaims, profile.BuildClaims(scopeMap))
-				}
+			if user != nil && hasEmail {
+				idClaims["email"] = user.Email
+				idClaims["email_verified"] = true
 			}
 		}
 
@@ -369,6 +371,7 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 		"exp":    now.Add(1 * time.Hour).Unix(),
 		"iat":    now.Unix(),
 		"scopes": rt.Scopes,
+		"uid":    s.EncryptUserID(rt.UserID),
 	}
 	atToken := jwt.NewWithClaims(signingMethod, atClaims)
 	atToken.Header["kid"] = keyMgr.KeyID
@@ -438,7 +441,18 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshTokenStr string,
 				maps.Copy(idClaims, profile.BuildClaims(scopeMap))
 			}
 		}
-		idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, idClaims)
+		alg := client.IDTokenSignedResponseAlg
+		if alg == "" {
+			alg = "RS256"
+		}
+		keyMgr, err := s.keyService.GetActiveKeyManager(ctx, alg)
+		if err != nil {
+			return nil, errors.New("internal_server_error_keys")
+		}
+
+		signingMethod := s.getSigningMethod(alg)
+
+		idToken := jwt.NewWithClaims(signingMethod, idClaims)
 		idToken.Header["kid"] = keyMgr.KeyID
 
 		idTokenStr, err := idToken.SignedString(keyMgr.PrivateKey)
@@ -548,9 +562,42 @@ func (s *OAuthService) ClientCredentials(ctx context.Context, clientID, clientSe
 	}, nil
 }
 
+type jwtHeader struct {
+	Alg string `json:"alg"`
+	Kid string `json:"kid"`
+	Typ string `json:"typ"`
+}
+
+func (s *OAuthService) DecodeJWTHeader(token string) (*jwtHeader, error) {
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	header := parts[0]
+
+	// decode base64 (JWT ใช้ RawURLEncoding)
+	data, err := base64.RawURLEncoding.DecodeString(header)
+	if err != nil {
+		return nil, err
+	}
+
+	var result jwtHeader
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
 // ValidateAccessToken parses and verifies an access token.
 func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString string) (jwt.MapClaims, error) {
-	records, err := s.keyService.keyRepo.FindAll(ctx, map[string]any{"alg": s.cfg.GetArray("oidc.id_token_signing_alg_values_supported")})
+	header, err := s.DecodeJWTHeader(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.keyService.keyRepo.FindAll(ctx, map[string]any{"alg": header.Alg})
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +633,11 @@ func (s *OAuthService) ValidateAccessToken(ctx context.Context, tokenString stri
 // ValidateIDToken parses and verifies an ID token according to OIDC spec.
 func (s *OAuthService) ValidateIDToken(ctx context.Context, tokenString string) (jwt.MapClaims, error) {
 	// For OIDC Server's own ID Tokens, we use the same key pool as Access Tokens
-	records, err := s.keyService.keyRepo.FindAll(ctx, map[string]any{"alg": s.cfg.GetArray("oidc.id_token_signing_alg_values_supported")})
+	header, err := s.DecodeJWTHeader(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.keyService.keyRepo.FindAll(ctx, map[string]any{"alg": header.Alg})
 	if err != nil {
 		return nil, err
 	}
@@ -1011,8 +1062,20 @@ func (s *OAuthService) deriveSub(client *models.Client, userID string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+func (s *OAuthService) EncryptUserID(userID string) string {
+	encrypted, err := crypto.Encrypt(userID, s.cfg.InternalSecret)
+	if err != nil {
+		fmt.Printf("ERROR: EncryptUserID failed: %v\n", err)
+		return ""
+	}
+	return encrypted
+}
+
+func (s *OAuthService) DecryptUserID(encryptedID string) (string, error) {
+	return crypto.Decrypt(encryptedID, s.cfg.InternalSecret)
+}
+
 // validateClientAuth enforces the registered token_endpoint_auth_method for a client.
-// usedMethod: how credentials were actually sent ("client_secret_basic", "client_secret_post", "none")
 func (s *OAuthService) validateClientAuth(client *models.Client, usedMethod, secret string) error {
 	expected := client.TokenEndpointAuthMethod
 	if expected == "" {

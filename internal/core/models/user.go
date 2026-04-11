@@ -61,8 +61,8 @@ type UserProfile struct {
 	UpdatedAt time.Time `bson:"updated_at,omitempty" json:"updated_at"`
 }
 
-func (p *UserProfile) BuildClaims(scope map[string]bool) map[string]interface{} {
-	claims := map[string]interface{}{}
+func (p *UserProfile) BuildClaims(scope map[string]bool) map[string]any {
+	claims := map[string]any{}
 	if p == nil {
 		return claims
 	}

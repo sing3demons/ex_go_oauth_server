@@ -27,6 +27,7 @@ type Config struct {
 	KeyMaxRetentionCount int
 	AdminUsername        string
 	AdminPassword        string
+	InternalSecret       string
 
 	Oidc           OIDC
 	TrustedIssuers []TrustedIssuer
@@ -190,6 +191,7 @@ func LoadConfig() *Config {
 		KeyMaxRetentionCount: yamlCfg.App.KeyMaxRetentionCount,
 		AdminUsername:        getEnv("ADMIN_USERNAME", ""),
 		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
+		InternalSecret:       getEnv("INTERNAL_SECRET", "this-is-a-32-byte-secret-key-123"), // Must be 32 bytes for AES-256
 		PairwiseSalt:         getEnv("PAIRWISE_SALT", "default-pairwise-salt-change-in-production"),
 		LoggerConfig:         yamlCfg.Log,
 		Oidc:                 yamlCfg.Oidc,

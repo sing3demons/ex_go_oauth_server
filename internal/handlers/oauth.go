@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -765,7 +766,10 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 			errorType = "invalid_scope"
 		}
 
-		ctx.JSON(http.StatusBadRequest, map[string]string{
+		ctx.JsonError(&response.Error{
+			Err:     err,
+			Message: response.InvalidRequest,
+		}, map[string]string{
 			"error":             errorType,
 			"error_description": errorMsg,
 		})
@@ -800,19 +804,39 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 		return
 	}
 
-	// 2. ควัก ID ผู้ใช้จาก 'sub'
-	sub, ok := claims["sub"].(string)
-	if !ok || sub == "" {
+	// 2. ควัก ID ผู้ใช้จาก 'uid' (Internal/Encrypted) และ 'sub' (Public)
+	encryptedUID, _ := claims["uid"].(string)
+	sub, _ := claims["sub"].(string)
+
+	var uid string
+	// var err error
+	if encryptedUID != "" {
+		uid, err = h.oauthService.DecryptUserID(encryptedUID)
+		if err != nil {
+			ctx.JsonError(&response.Error{
+				Err:     fmt.Errorf("failed to decrypt user identity"),
+				Message: response.InvalidRequest,
+			}, response.InvalidRequest.Error())
+			return
+		}
+	} else {
+		// Fallback for older tokens or systems not using encrypted UID
+		uid = sub
+	}
+
+	if uid == "" {
 		ctx.JsonError(&response.Error{
-			Err:     fmt.Errorf("Invalid token claims"),
+			Err:     fmt.Errorf("Invalid token claims: missing user identifier"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
 		return
 	}
 
-	// 3. ดึงข้อมูล User จาก DB
-	user, err := h.userRepo.FindByID(ctx, sub)
-	if err != nil || user == nil {
+	// 3. ดึงข้อมูล User และ Profile จาก DB
+	user, _ := h.userRepo.FindByID(ctx, uid)
+	profile, _ := h.userProfileRepo.FindByID(ctx, uid)
+
+	if user == nil {
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("User not found"),
 			Message: response.InvalidRequest,
@@ -822,23 +846,31 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 
 	// 4. ประกอบร่าง JSON ตามมาตรฐาน OIDC
 	userInfo := map[string]any{
-		"sub": user.ID,
+		"sub": sub, // MUST match the 'sub' in the token
 	}
 
-	// ตรวจสอบ Scopes ที่พ่วงมากว่าได้รับอนุญาตให้ดูอะไรบ้าง
+	// ตรวจสอบ Scopes และดึงข้อมูลที่ได้รับอนุญาต
+	scopeMap := make(map[string]bool)
 	if scopesRaw, ok := claims["scopes"].([]any); ok {
 		for _, sRaw := range scopesRaw {
 			if s, ok := sRaw.(string); ok {
-				if s == "profile" {
-					userInfo["name"] = user.Username
-					userInfo["preferred_username"] = user.Username
-				}
-				if s == "email" {
-					userInfo["email"] = user.Email
-					userInfo["email_verified"] = true
-				}
+				scopeMap[s] = true
 			}
 		}
+	}
+
+	if scopeMap["email"] {
+		userInfo["email"] = user.Email
+		userInfo["email_verified"] = true
+	}
+
+	if profile != nil {
+		// Use the BuildClaims helper we created earlier
+		maps.Copy(userInfo, profile.BuildClaims(scopeMap))
+	} else if scopeMap["profile"] {
+		// Fallback for basic profile if no rich profile exists
+		userInfo["name"] = user.Username
+		userInfo["preferred_username"] = user.Username
 	}
 
 	ctx.JSON(http.StatusOK, userInfo)
@@ -1042,6 +1074,11 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 		return
 	}
 
+	var uid string
+	if encryptedUID, ok := claims["uid"].(string); ok && encryptedUID != "" {
+		uid, _ = h.oauthService.DecryptUserID(encryptedUID)
+	}
+
 	// ถ้าถูกต้อง นำข้อมูลกลับมาแพคตามมาตรฐาน
 	resp := map[string]any{
 		"active": true,
@@ -1050,6 +1087,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 		"aud":    claims["aud"],
 		"exp":    claims["exp"],
 		"iat":    claims["iat"],
+		"uid":    uid, // Decrypted for internal convenience
 	}
 
 	// แปลง Array Scopes กลับเป็นวรรค (Space-separated)
