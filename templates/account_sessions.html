@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <script>alert("HEAD SCRIPT EXECUTED!");</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manage Sessions | OAuth</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -232,13 +233,55 @@
 <body>
 
     <div class="container">
-        <div class="header">
-            <h1>Active Sessions</h1>
-            <p class="subtitle">Management and security of your active accounts on different devices.</p>
+        <div class="section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            Multi-Factor Authentication (MFA)
+        </div>
+        <div class="session-card">
+            <div class="session-info">
+                <div class="device-icon">
+                    🔐
+                </div>
+                <div class="details">
+                    <h3>TOTP Authenticator</h3>
+                    <p>Status: <span style="color: {{ if .MFAEnabled }}#10b981{{ else }}#ef4444{{ end }}; font-weight: 600;">{{ if .MFAEnabled }}Enabled{{ else }}Disabled{{ end }}</span></p>
+                </div>
+            </div>
+            {{ if not .MFAEnabled }}
+            <a href="/mfa/setup" class="revoke-btn" style="text-decoration: none; border-color: var(--primary); color: var(--primary);">
+                Enable MFA
+            </a>
+            {{ end }}
         </div>
 
+        <div class="session-card" style="margin-top: 20px;">
+            <div class="session-info">
+                <div class="device-icon">
+                    👆
+                </div>
+                <div class="details">
+                    <h3>Biometric / Passkey</h3>
+                    <p>Status: <span style="color: {{ if gt .PasskeysCount 0 }}#10b981{{ else }}#94a3b8{{ end }}; font-weight: 600;">{{ if gt .PasskeysCount 0 }}Registered ({{ .PasskeysCount }}){{ else }}Not Registered{{ end }}</span></p>
+                </div>
+            </div>
+            
+            {{ if gt .PasskeysCount 0 }}
+            <a href="/account/passkeys" class="revoke-btn" style="text-decoration: none; border-color: var(--primary); color: var(--primary); display: inline-block;">
+                Manage Passkeys
+            </a>
+            {{ else }}
+            <button onclick="registerPasskey()" class="revoke-btn" style="border-color: var(--primary); color: var(--primary);">
+                Register Passkey
+            </button>
+            {{ end }}
+        </div>
+
+        <div class="header" style="margin-top: 40px; margin-bottom: 20px;">
+            <h1 style="font-size: 1.5rem;">Active Sessions</h1>
+        </div>
         <div class="sessions-list">
             {{ $currentSID := .CurrentSID }}
+            {{ if .Sessions }}
             {{ range .Sessions }}
             <div class="session-card {{ if eq .SID $currentSID }}current{{ end }}">
                 <div class="session-info">
@@ -261,6 +304,7 @@
                     </button>
                 </form>
             </div>
+            {{ end }}
             {{ else }}
             <div class="empty-state">
                 <p>No active sessions found.</p>
@@ -306,6 +350,78 @@
         <a href="/authorize" class="back-link">← Back to Services</a>
     </div>
 
+    <script>
+        console.log("Script block is parsing and executing! If you see this, JS syntax is OK.");
+        // --- WebAuthn Helper Functions ---
+        window.bufferDecode = function(value) {
+            value = value.replace(/-/g, "+").replace(/_/g, "/");
+            const padLen = (4 - (value.length % 4)) % 4;
+            value += '='.repeat(padLen);
+            return Uint8Array.from(atob(value), c => c.charCodeAt(0));
+        }
+
+        window.bufferEncode = function(value) {
+            return btoa(String.fromCharCode.apply(null, new Uint8Array(value)))
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=/g, "");
+        }
+
+        window.registerPasskey = async function() {
+            alert("Clicked Register Button in Sessions!");
+            console.log("Register passkey clicked");
+            try {
+                // 1. Begin Registration
+                const beginRes = await fetch('/webauthn/register/begin');
+                if (!beginRes.ok) throw new Error('Failed to begin registration');
+                const makeCredOptions = await beginRes.json();
+
+                // 2. Decode necessary fields to ArrayBuffer
+                makeCredOptions.publicKey.challenge = window.bufferDecode(makeCredOptions.publicKey.challenge);
+                makeCredOptions.publicKey.user.id = window.bufferDecode(makeCredOptions.publicKey.user.id);
+                if (makeCredOptions.publicKey.excludeCredentials) {
+                    makeCredOptions.publicKey.excludeCredentials.forEach(cred => {
+                        cred.id = window.bufferDecode(cred.id);
+                    });
+                }
+
+                // 3. Prompt WebAuthn UI
+                const credential = await navigator.credentials.create({
+                    publicKey: makeCredOptions.publicKey
+                });
+
+                // 4. Encode result back to JSON
+                const clientResponse = {
+                    id: credential.id,
+                    rawId: window.bufferEncode(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        attestationObject: window.bufferEncode(credential.response.attestationObject),
+                        clientDataJSON: window.bufferEncode(credential.response.clientDataJSON)
+                    }
+                };
+
+                // 5. Finish Registration
+                const finishRes = await fetch('/webauthn/register/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(clientResponse)
+                });
+
+                if (finishRes.ok) {
+                    alert('Passkey registered successfully!');
+                    window.location.reload();
+                } else {
+                    const errPayload = await finishRes.json();
+                    throw new Error(errPayload.error || 'Failed to finish registration');
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert('Error: ' + err.message);
+            }
+        }
+    </script>
 </body>
 
 </html>

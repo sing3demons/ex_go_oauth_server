@@ -11,6 +11,7 @@ type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error
 	FindByUsername(ctx context.Context, username string) (*models.User, error)
 	FindByID(ctx context.Context, id string) (*models.User, error)
+	UpdateMFAEnabled(ctx context.Context, userID string, enabled bool) error
 }
 
 type UserProfileRepository interface {
@@ -24,6 +25,9 @@ type UserCredentialRepository interface {
 	CreateMany(ctx context.Context, credentials []*models.UserCredential) error
 	FindByUsernamePassword(ctx context.Context, username string) (*models.UserCredential, error)
 	FindByID(ctx context.Context, id string) (*models.UserCredential, error)
+	FindByUserIDAndType(ctx context.Context, userID, credentialType string) (*models.UserCredential, error)
+	FindAllByUserIDAndType(ctx context.Context, userID, credentialType string) ([]*models.UserCredential, error)
+	DeleteByID(ctx context.Context, id string) error
 }
 
 type ClientRepository interface {

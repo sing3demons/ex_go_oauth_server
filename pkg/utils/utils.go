@@ -3,8 +3,11 @@ package utils
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"net/mail"
 	"regexp"
+
+	"github.com/mssola/user_agent"
 )
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -43,4 +46,11 @@ func ValidateSessionID(s string) bool {
 	}
 
 	return true
+}
+
+func GetDeviceInfo(uaStr string) string {
+	ua := user_agent.New(uaStr)
+	browser, version := ua.Browser()
+	os := ua.OS()
+	return fmt.Sprintf("%s (%s %s)", os, browser, version)
 }

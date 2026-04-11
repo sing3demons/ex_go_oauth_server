@@ -62,17 +62,20 @@
 <body>
     <div class="header">
         <h1>Dashboard</h1>
-        <a href="/logout" class="btn-logout">Logout</a>
+        <div>
+            <a href="http://localhost:8080/account/sessions" class="btn-account" style="padding: 10px 20px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; margin-right: 10px;">Account Settings</a>
+            <a href="/logout" class="btn-logout">Logout</a>
+        </div>
     </div>
 
     <div class="card">
         <h2>User Profile (From /userinfo)</h2>
-        <pre>{{ .user | json }}</pre>
+        <pre>{{ printf "%+v" .user }}</pre>
     </div>
 
     <div class="card">
         <h2>Tokens Received (From /token)</h2>
-        <pre>{{ .tokens | json }}</pre>
+        <pre>{{ printf "%+v" .tokens }}</pre>
     </div>
 </body>
 </html>

@@ -8,16 +8,19 @@ import (
 	"github.com/sing3demons/oauth_server/internal/adapters/mongo_store"
 	"github.com/sing3demons/oauth_server/internal/adapters/redis_store"
 	"github.com/sing3demons/oauth_server/internal/core/models"
+	"github.com/sing3demons/oauth_server/internal/core/ports"
 	"github.com/sing3demons/oauth_server/pkg/kp"
 )
 
 type AccountHandler struct {
 	sessionCache *redis_store.SessionCache
 	auditRepo    *mongo_store.AuditRepository
+	userRepo     ports.UserRepository
+	credRepo     ports.UserCredentialRepository
 }
 
-func NewAccountHandler(sessionCache *redis_store.SessionCache, auditRepo *mongo_store.AuditRepository) *AccountHandler {
-	return &AccountHandler{sessionCache: sessionCache, auditRepo: auditRepo}
+func NewAccountHandler(sessionCache *redis_store.SessionCache, auditRepo *mongo_store.AuditRepository, userRepo ports.UserRepository, credRepo ports.UserCredentialRepository) *AccountHandler {
+	return &AccountHandler{sessionCache: sessionCache, auditRepo: auditRepo, userRepo: userRepo, credRepo: credRepo}
 }
 
 // SessionsUI (GET /account/sessions)
@@ -39,20 +42,38 @@ func (h *AccountHandler) SessionsUI(ctx *kp.Ctx) {
 		return
 	}
 
+	// 3. Get all active sessions for this user
+	allSessions, _ := h.sessionCache.GetUserSessions(ctx, session.UserID)
+
 	// 4. Get last 15 audit logs for this user (skip 0)
 	history, err := h.auditRepo.FindByUserID(ctx, session.UserID, 15, 0)
 	if err != nil {
 		history = nil // Fallback to no history if error
 	}
 
+	// 5. Get User to check MFA status
+	user, _ := h.userRepo.FindByID(ctx, session.UserID)
+	mfaEnabled := false
+	if user != nil {
+		mfaEnabled = user.MFAEnabled
+	}
+
+	// 6. Get Passkey count
+	creds, _ := h.credRepo.FindAllByUserIDAndType(ctx, session.UserID, "passkey")
+	passkeysCount := len(creds)
+
 	data := struct {
-		CurrentSID string
-		Sessions   any
-		History    any
+		CurrentSID    string
+		Sessions      any
+		History       any
+		MFAEnabled    bool
+		PasskeysCount int
 	}{
-		CurrentSID: sid,
-		Sessions:   session,
-		History:    history,
+		CurrentSID:    sid,
+		Sessions:      allSessions,
+		History:       history,
+		MFAEnabled:    mfaEnabled,
+		PasskeysCount: passkeysCount,
 	}
 
 	ctx.RenderTemplate("templates/account_sessions.html", data)
@@ -165,4 +186,65 @@ func (h *AccountHandler) HistoryUI(ctx *kp.Ctx) {
 	}
 
 	ctx.RenderTemplate("templates/account_history.html", data)
+}
+
+// PasskeysUI (GET /account/passkeys)
+func (h *AccountHandler) PasskeysUI(ctx *kp.Ctx) {
+	ctx.Log("account_passkeys_ui")
+
+	cookie, err := ctx.Req.Cookie("oidc_session")
+	if err != nil || cookie.Value == "" {
+		ctx.Redirect("/authorize?error=session_expired", http.StatusFound)
+		return
+	}
+	sid := cookie.Value
+
+	session, err := h.sessionCache.GetSession(ctx, sid)
+	if err != nil || session == nil {
+		ctx.Redirect("/authorize?error=session_expired", http.StatusFound)
+		return
+	}
+
+	creds, _ := h.credRepo.FindAllByUserIDAndType(ctx, session.UserID, "passkey")
+
+	data := struct {
+		CurrentSID string
+		Passkeys   any
+	}{
+		CurrentSID: sid,
+		Passkeys:   creds,
+	}
+
+	ctx.RenderTemplate("templates/account_passkeys.html", data)
+}
+
+// RevokePasskey (POST /account/passkeys/revoke)
+func (h *AccountHandler) RevokePasskey(ctx *kp.Ctx) {
+	ctx.Log("revoke_passkey")
+
+	credID := ctx.Req.FormValue("id")
+	if credID == "" {
+		ctx.Redirect("/account/passkeys", http.StatusFound)
+		return
+	}
+
+	cookie, err := ctx.Req.Cookie("oidc_session")
+	if err != nil || cookie.Value == "" {
+		ctx.Redirect("/authorize?error=session_expired", http.StatusFound)
+		return
+	}
+
+	session, err := h.sessionCache.GetSession(ctx, cookie.Value)
+	if err != nil || session == nil {
+		ctx.Redirect("/authorize?error=session_expired", http.StatusFound)
+		return
+	}
+
+	// Verify the credential belongs to the current user
+	cred, err := h.credRepo.FindByID(ctx, credID)
+	if err == nil && cred.UserID == session.UserID {
+		h.credRepo.DeleteByID(ctx, credID)
+	}
+
+	ctx.Redirect("/account/passkeys", http.StatusFound)
 }

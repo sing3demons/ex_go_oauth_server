@@ -57,6 +57,7 @@ func main() {
 	supportedAlgs := cfg.GetArray("oidc.id_token_signing_alg_values_supported")
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount, supportedAlgs)
 	oauthService := services.NewOAuthService(cfg, clientRepo, authCodeCache, rtRepo, keyService, userRepo, profileRepo)
+	otpService := services.NewOTPService(credentialRepo, cfg.Issuer)
 
 	// Start Key generation or fetching
 	ctx := context.Background()
@@ -71,17 +72,41 @@ func main() {
 	discoveryHandler := handlers.NewDiscoveryHandler(cfg, keyService)
 	app.GET("/.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	app.GET("/jwks.json", discoveryHandler.JWKS)
+	oauthHandler := handlers.NewOAuthHandler(cfg, clientRepo, userRepo, profileRepo, oauthService, otpService, credentialRepo, sessionCache, transactionCache, auditRepo)
+	accountHandler := handlers.NewAccountHandler(sessionCache, auditRepo, userRepo, credentialRepo)
+	mfaHandler := handlers.NewMFAHandler(oauthHandler)
 
-	oauthHandler := handlers.NewOAuthHandler(cfg, clientRepo, userRepo, profileRepo, authCodeCache, oauthService, credentialRepo, sessionCache, transactionCache, auditRepo)
-	accountHandler := handlers.NewAccountHandler(sessionCache, auditRepo)
+	webauthnService, err := services.NewWebAuthnService(cfg, userRepo, credentialRepo)
+	if err != nil {
+		log.Fatalf("Failed to initialize WebAuthnService: %v", err)
+	}
+	webauthnHandler := handlers.NewWebAuthnHandler(oauthHandler, webauthnService)
 
 	app.GET("/authorize", oauthHandler.Authorize)
 	app.POST("/login", oauthHandler.LoginSubmit, middleware.RateLimitMiddleware(rateLimitCache, 5, 1*time.Minute))
 	app.POST("/register", oauthHandler.RegisterSubmit)
 	app.GET("/consent", oauthHandler.ConsentUI)
 	app.POST("/consent", oauthHandler.ConsentSubmit)
+
+	// WebAuthn Routes
+	app.GET("/webauthn/register/begin", webauthnHandler.RegisterBegin)
+	app.POST("/webauthn/register/finish", webauthnHandler.RegisterFinish)
+	app.GET("/webauthn/login/begin", webauthnHandler.LoginBegin)
+	app.POST("/webauthn/login/finish", webauthnHandler.LoginFinish)
+
+	// MFA Routes
+	app.GET("/mfa/verify", mfaHandler.VerifyUI)
+	app.POST("/mfa/verify", mfaHandler.VerifySubmit)
+	app.GET("/mfa/setup", mfaHandler.SetupUI)
+	app.POST("/mfa/setup", mfaHandler.SetupSubmit)
+
 	app.GET("/account/sessions", accountHandler.SessionsUI)
 	app.POST("/account/sessions/revoke", accountHandler.RevokeSession)
+	
+	// Passkey Management Routes
+	app.GET("/account/passkeys", accountHandler.PasskeysUI)
+	app.POST("/account/passkeys/revoke", accountHandler.RevokePasskey)
+
 	app.GET("/account/history", accountHandler.HistoryUI)
 	app.POST("/token", oauthHandler.Token)
 	app.GET("/userinfo", oauthHandler.UserInfo)

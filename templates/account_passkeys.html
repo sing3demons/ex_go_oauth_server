@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Passkeys | OAuth</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #38bdf8;
+            --bg-dark: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --danger: #ef4444;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.1) 0%, transparent 40%),
+                radial-gradient(circle at 100% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 40%);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .header {
+            margin-bottom: 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 2.25rem;
+            font-weight: 700;
+            margin: 0;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .passkeys-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .passkey-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .passkey-card:hover {
+            border-color: rgba(56, 189, 248, 0.3);
+        }
+
+        .passkey-info {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .device-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .details h3 {
+            margin: 0 0 4px;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .details p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .revoke-btn {
+            background: transparent;
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .revoke-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+        }
+
+        .primary-btn {
+            background: var(--primary);
+            color: #0f172a;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .primary-btn:hover {
+            background: #7dd3fc;
+            box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            border: 1px dashed var(--border-color);
+            border-radius: 20px;
+            color: var(--text-muted);
+        }
+
+        .back-link {
+            margin-top: 40px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>Manage Passkeys</h1>
+                <p class="subtitle" style="margin-top: 5px;">Your registered biometric devices / passkeys</p>
+            </div>
+            <button onclick="registerPasskey()" class="primary-btn">+ Add Passkey</button>
+        </div>
+
+        <div class="passkeys-list">
+            {{ if .Passkeys }}
+            {{ range .Passkeys }}
+            <div class="passkey-card">
+                <div class="passkey-info">
+                    <div class="device-icon">
+                        👆
+                    </div>
+                    <div class="details">
+                        <h3 style="font-family: monospace;">...{{ slice .Identifier 0 10 }}</h3>
+                        <p>Registered: {{ .CreatedAt.Format "02 Jan 2006, 15:04" }}</p>
+                    </div>
+                </div>
+
+                <form method="POST" action="/account/passkeys/revoke">
+                    <input type="hidden" name="id" value="{{ .ID.Hex }}">
+                    <button type="submit" class="revoke-btn" onclick="return confirm('Are you sure you want to remove this passkey? You will not be able to sign in with this device.')">
+                        Remove
+                    </button>
+                </form>
+            </div>
+            {{ end }}
+            {{ else }}
+            <div class="empty-state">
+                <p>No passkeys registered yet.</p>
+                <div style="margin-top: 20px;">
+                    <button onclick="registerPasskey()" class="primary-btn">Register your first Passkey</button>
+                </div>
+            </div>
+            {{ end }}
+        </div>
+
+        <a href="/account/sessions" class="back-link">← Back to Settings</a>
+    </div>
+
+    <script>
+        console.log("Script block is parsing and executing! If you see this, JS syntax is OK.");
+        // --- WebAuthn Helper Functions ---
+        window.bufferDecode = function(value) {
+            value = value.replace(/-/g, "+").replace(/_/g, "/");
+            const padLen = (4 - (value.length % 4)) % 4;
+            value += '='.repeat(padLen);
+            return Uint8Array.from(atob(value), c => c.charCodeAt(0));
+        }
+
+        window.bufferEncode = function(value) {
+            return btoa(String.fromCharCode.apply(null, new Uint8Array(value)))
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=/g, "");
+        }
+
+        window.registerPasskey = async function() {
+            alert("Clicked Register Button!");
+            console.log("Button clicked!");
+            try {
+                console.log("Fetching /webauthn/register/begin...");
+                const beginRes = await fetch('/webauthn/register/begin');
+                console.log("Response status:", beginRes.status);
+                if (!beginRes.ok) throw new Error('Failed to begin registration: ' + beginRes.status);
+                const makeCredOptions = await beginRes.json();
+                console.log("Options received:", makeCredOptions);
+
+                makeCredOptions.publicKey.challenge = window.bufferDecode(makeCredOptions.publicKey.challenge);
+                makeCredOptions.publicKey.user.id = window.bufferDecode(makeCredOptions.publicKey.user.id);
+                if (makeCredOptions.publicKey.excludeCredentials) {
+                    makeCredOptions.publicKey.excludeCredentials.forEach(cred => {
+                        cred.id = window.bufferDecode(cred.id);
+                    });
+                }
+
+                console.log("Prompting WebAuthn...");
+                // 3. Prompt WebAuthn UI
+                const credential = await navigator.credentials.create({
+                    publicKey: makeCredOptions.publicKey
+                });
+                console.log("Got credential!");
+
+                // 4. Encode result back to JSON
+                const clientResponse = {
+                    id: credential.id,
+                    rawId: window.bufferEncode(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        attestationObject: window.bufferEncode(credential.response.attestationObject),
+                        clientDataJSON: window.bufferEncode(credential.response.clientDataJSON)
+                    }
+                };
+
+                const finishRes = await fetch('/webauthn/register/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(clientResponse)
+                });
+
+                if (finishRes.ok) {
+                    alert('Passkey registered successfully!');
+                    window.location.reload();
+                } else {
+                    const errPayload = await finishRes.json();
+                    throw new Error(errPayload.error || 'Failed to finish registration');
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert('Error: ' + err.message);
+            }
+        }
+    </script>
+</body>
+</html>

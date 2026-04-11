@@ -44,10 +44,12 @@
         <div id="login-form" class="form-section active">
             <form method="POST" action="/login?sid={{.SID}}&tid={{.TID}}">
                 <label>Username</label>
-                <input type="text" name="username" placeholder="your username" required />
+                <input type="text" id="login-username" name="username" placeholder="your username" required />
                 <label>Password</label>
                 <input type="password" name="password" placeholder="••••••••" required />
-                <button type="submit" class="btn-primary">Sign In</button>
+                <button type="submit" class="btn-primary">Sign In with Password</button>
+                <div style="text-align: center; margin: 15px 0; color: #777;">or</div>
+                <button type="button" id="passkey-login-btn" style="background: #f1f5f9; color: #0f172a; border: 1px solid #cbd5e1; font-size: 16px; font-weight: 600; padding: 12px; border-radius: 6px; cursor: pointer; width: 100%;">👆 Sign in with Passkey</button>
             </form>
         </div>
 
@@ -102,6 +104,82 @@
         if (window.location.hash === '#register') {
             switchTab('register');
         }
+
+        // --- WebAuthn Helper Functions ---
+        function bufferDecode(value) {
+            return Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+        }
+
+        function bufferEncode(value) {
+            return btoa(String.fromCharCode.apply(null, new Uint8Array(value)))
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=/g, "");
+        }
+
+        document.getElementById('passkey-login-btn').addEventListener('click', async () => {
+            const usernameInput = document.getElementById('login-username').value;
+            if (!usernameInput) {
+                alert('Please enter your username first to use Passkey.');
+                return;
+            }
+
+            try {
+                const sid = new URLSearchParams(window.location.search).get('sid') || '{{.SID}}';
+                const tid = new URLSearchParams(window.location.search).get('tid') || '{{.TID}}';
+
+                // 1. Begin Login
+                const beginRes = await fetch(`/webauthn/login/begin?username=${encodeURIComponent(usernameInput)}`);
+                if (!beginRes.ok) {
+                    const err = await beginRes.json();
+                    throw new Error(err.error || 'Failed to begin passkey login');
+                }
+                const makeAssertionOptions = await beginRes.json();
+
+                // 2. Decode challenge
+                makeAssertionOptions.publicKey.challenge = bufferDecode(makeAssertionOptions.publicKey.challenge);
+                makeAssertionOptions.publicKey.allowCredentials.forEach(cred => {
+                    cred.id = bufferDecode(cred.id);
+                });
+
+                // 3. Prompt WebAuthn
+                const assertion = await navigator.credentials.get({
+                    publicKey: makeAssertionOptions.publicKey
+                });
+
+                // 4. Encode result
+                const clientResponse = {
+                    id: assertion.id,
+                    rawId: bufferEncode(assertion.rawId),
+                    type: assertion.type,
+                    response: {
+                        authenticatorData: bufferEncode(assertion.response.authenticatorData),
+                        clientDataJSON: bufferEncode(assertion.response.clientDataJSON),
+                        signature: bufferEncode(assertion.response.signature),
+                        userHandle: assertion.response.userHandle ? bufferEncode(assertion.response.userHandle) : null,
+                    }
+                };
+
+                // 5. Finish Login
+                const finishRes = await fetch(`/webauthn/login/finish?username=${encodeURIComponent(usernameInput)}&sid=${encodeURIComponent(sid)}&tid=${encodeURIComponent(tid)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(clientResponse)
+                });
+
+                if (finishRes.ok) {
+                    const data = await finishRes.json();
+                    window.location.href = data.redirect_to || '/consent?sid=' + sid + '&tid=' + tid;
+                } else {
+                    const errPayload = await finishRes.json();
+                    throw new Error(errPayload.error || 'Failed to finish login');
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert('Error: ' + err.message);
+            }
+        });
     </script>
 </body>
 </html>

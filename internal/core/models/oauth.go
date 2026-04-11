@@ -3,14 +3,17 @@ package models
 import "time"
 
 type AuthTransaction struct {
-	ClientID            string    `json:"client_id"`
-	RedirectURI         string    `json:"redirect_uri"`
-	Scopes              []string  `json:"scopes"`
-	State               string    `json:"state"`
-	Nonce               string    `json:"nonce"`
+	ID                  string    `json:"id,omitempty"`
+	ClientID            string    `json:"client_id,omitempty"`
+	UserID              string    `json:"user_id,omitempty"`
+	SID                 string    `json:"sid,omitempty"`
+	RedirectURI         string    `json:"redirect_uri,omitempty"`
+	Scopes              []string  `json:"scopes,omitempty"`
+	State               string    `json:"state,omitempty"`
+	Nonce               string    `json:"nonce,omitempty"`
 	CodeChallenge       string    `json:"code_challenge,omitempty"`
 	CodeChallengeMethod string    `json:"code_challenge_method,omitempty"`
-	ExpiresAt           time.Time `json:"expires_at"`
+	ExpiresAt           time.Time `json:"expires_at,omitempty"`
 }
 
 type AuthCodeInfo struct {

@@ -2,6 +2,7 @@ package mongo_store
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/sing3demons/oauth_server/internal/core/models"
@@ -127,4 +128,31 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*models.User,
 		"result": user,
 	})
 	return &user, nil
+}
+
+func (r *UserRepository) UpdateMFAEnabled(ctx context.Context, userID string, enabled bool) error {
+	start := time.Now()
+	_logger := mlog.L(ctx)
+
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: r.col.Name(),
+	}).Info(logAction.DB_REQUEST(logAction.DB_UPDATE, "app -> mongo"), "users.updateOne({_id: "+userID+"}, {$set: {mfa_enabled: "+fmt.Sprintf("%v", enabled)+"}})")
+
+	_, err := r.col.UpdateOne(ctx, bson.M{"_id": userID}, bson.M{"$set": bson.M{"mfa_enabled": enabled}})
+	end := time.Since(start).Microseconds()
+	if err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
+		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+			Dependency:   r.col.Name(),
+			ResponseTime: end,
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_UPDATE, "mongo -> app"), resultDesc)
+		return err
+	}
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency:   r.col.Name(),
+		ResponseTime: end,
+		ResultCode:   "20000",
+	}).Info(logAction.DB_RESPONSE(logAction.DB_UPDATE, "mongo -> app"), "success")
+	return nil
 }

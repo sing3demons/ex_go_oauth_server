@@ -27,6 +27,7 @@ import (
 
 type OAuthHandler struct {
 	oauthService       *services.OAuthService
+	otpService         *services.OTPService
 	userRepo           ports.UserRepository
 	userCredentialRepo ports.UserCredentialRepository
 	userProfileRepo    ports.UserProfileRepository
@@ -37,13 +38,25 @@ type OAuthHandler struct {
 	cfg                *config.Config
 }
 
-func NewOAuthHandler(cfg *config.Config, clientRepo *mongo_store.ClientRepository, userRepo *mongo_store.UserRepository, userProfileRepo *mongo_store.UserProfileRepository, authCodeCache *redis_store.AuthCodeCache, oauthService *services.OAuthService, userCredentialRepo *mongo_store.UserCredentialRepository, sessionCache *redis_store.SessionCache, transactionCache *redis_store.TransactionCache, auditRepo *mongo_store.AuditRepository) *OAuthHandler {
+func NewOAuthHandler(
+	cfg *config.Config,
+	clientRepo ports.ClientRepository,
+	userRepo ports.UserRepository,
+	userProfileRepo ports.UserProfileRepository,
+	oauthService *services.OAuthService,
+	otpService *services.OTPService,
+	userCredentialRepo ports.UserCredentialRepository,
+	sessionCache *redis_store.SessionCache,
+	transactionCache *redis_store.TransactionCache,
+	auditRepo *mongo_store.AuditRepository,
+) *OAuthHandler {
 	return &OAuthHandler{
 		cfg:                cfg,
 		clientRepo:         clientRepo,
 		userRepo:           userRepo,
 		userProfileRepo:    userProfileRepo,
 		oauthService:       oauthService,
+		otpService:         otpService,
 		userCredentialRepo: userCredentialRepo,
 		sessionCache:       sessionCache,
 		transactionCache:   transactionCache,
@@ -350,6 +363,23 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	os := ua.OS()
 	deviceInfo := fmt.Sprintf("%s (%s %s)", os, browser, version)
 
+	// 🔥 MFA Check
+	user, _ := h.userRepo.FindByID(ctx, credential.UserID)
+	if user != nil && user.MFAEnabled {
+		// เก็บสถานะรอการยืนยัน MFA ไว้ใน Transaction Cache (อายุ 5 นาที)
+		// ใช้ tid เป็น key เพื่อความปลอดภัยเพราะผูกกับ OAuth Flow
+		mfaTx := &models.AuthTransaction{
+			ID:     tid,
+			UserID: user.ID,
+			SID:    sid,
+			State:  "mfa_pending",
+		}
+		h.transactionCache.SetTransaction(ctx, "mfa:"+tid, mfaTx, 5*time.Minute)
+
+		ctx.Redirect("/mfa/verify?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		return
+	}
+
 	h.auditRepo.Save(ctx, &models.AuditLog{
 		UserID:     credential.UserID,
 		Event:      "login_success",
@@ -380,7 +410,6 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		MaxAge:   86400,
 	})
 
-	// http.Redirect(w, r, "/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 	ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 }
 

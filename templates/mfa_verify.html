@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MFA Verification - OIDC Gateway</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f7f9fc; margin: 0; }
+        .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 400px; text-align: center; }
+        input { width: 100%; padding: 12px; margin: 10px 0 20px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 24px; text-align: center; letter-spacing: 5px; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0056b3; }
+        .logo { font-size: 24px; font-weight: bold; margin-bottom: 20px; color: #333; }
+        .error { color: #dc3545; font-size: 14px; margin-bottom: 15px; }
+        .instruction { font-size: 14px; color: #666; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">MFA Verification</div>
+        <p class="instruction">Please enter the 6-digit code from your authenticator app.</p>
+        
+        {{if .Error}}
+        <div class="error">
+            {{if eq .Error "invalid_code"}}Invalid code. Please try again.
+            {{else if eq .Error "code_expired"}}Code expired. Please try again.
+            {{else if eq .Error "missing_code"}}Please enter the code.
+            {{else}}{{.Error}}{{end}}
+        </div>
+        {{end}}
+
+        <form method="POST" action="/mfa/verify?sid={{.SID}}&tid={{.TID}}">
+            <input type="text" name="code" placeholder="000000" maxlength="6" pattern="\d{6}" required autofocus />
+            <button type="submit" class="btn-primary">Verify</button>
+        </form>
+        <p style="margin-top: 20px;"><a href="/login?sid={{.SID}}&tid={{.TID}}" style="color: #007bff; text-decoration: none; font-size: 14px;">Back to Login</a></p>
+    </div>
+</body>
+</html>

@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 // Scope → Claim Mapping
@@ -21,12 +23,44 @@ type User struct {
 
 	// PasswordHash string `bson:"password_hash" json:"-"`
 
-	Status string `bson:"status"` // active, suspended
+	Status     string    `bson:"status"` // active, suspended
+	MFAEnabled bool      `bson:"mfa_enabled" json:"mfa_enabled"`
 
 	// GivenName  string    `bson:"given_name" json:"given_name"`
 	// FamilyName string    `bson:"family_name" json:"family_name"`
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
+
+	webAuthnCredentials []webauthn.Credential `bson:"-" json:"-"`
+}
+
+// WebAuthnID returns the user's ID
+func (u *User) WebAuthnID() []byte {
+	return []byte(u.ID)
+}
+
+// WebAuthnName returns the user's username
+func (u *User) WebAuthnName() string {
+	return u.Username
+}
+
+// WebAuthnDisplayName returns the user's display name
+func (u *User) WebAuthnDisplayName() string {
+	return u.Username
+}
+
+// WebAuthnIcon is not (yet) implemented
+func (u *User) WebAuthnIcon() string {
+	return ""
+}
+
+// WebAuthnCredentials returns credentials owned by the user
+func (u *User) WebAuthnCredentials() []webauthn.Credential {
+	return u.webAuthnCredentials
+}
+
+func (u *User) AddWebAuthnCredential(cred webauthn.Credential) {
+	u.webAuthnCredentials = append(u.webAuthnCredentials, cred)
 }
 
 type UserProfile struct {
