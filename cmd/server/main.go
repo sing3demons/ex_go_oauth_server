@@ -137,7 +137,7 @@ func main() {
 	// *
 	app.Any("/", func(ctx *kp.Ctx) {
 		ctx.Log("unknown")
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("unknown endpoint"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())

@@ -610,7 +610,7 @@ func (c *Ctx) JSON(code int, v any, maskOptions ...logger.MaskingOption) error {
 	return nil
 }
 
-func (c *Ctx) JsonError(err *response.Error, body any) error {
+func (c *Ctx) JSONError(err *response.Error, body any) error {
 	c.ensureRequestMetadata(c.cmd, nil)
 	c.SetHeader("Content-Type", "application/json")
 	c.SetHeader("X-Session-ID", c.sessionId)

@@ -50,7 +50,7 @@ func (h *DiscoveryHandler) JWKS(ctx *kp.Ctx) {
 	jwks, err := h.ks.GetJWKS(ctx)
 	if err != nil {
 		// http.Error(w, "Failed to get JWKS", http.StatusInternalServerError)
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.SystemError,
 		}, response.SystemError.Error())

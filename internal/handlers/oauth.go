@@ -231,7 +231,7 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 	}
 
 	if errMsg != "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("error: %s", errMsg),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -239,7 +239,7 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 	}
 
 	if client_id == "" || redirect_uri == "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing required parameters: client_id=%s, redirect_uri=%s", client_id, redirect_uri),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -274,7 +274,7 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 					return
 				}
 			}
-			ctx.JsonError(err, body.Error())
+			ctx.JSONError(err, body.Error())
 			return
 		}
 	} else {
@@ -306,11 +306,11 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 							return
 						}
 					}
-					ctx.JsonError(err, body.Error())
+					ctx.JSONError(err, body.Error())
 					return
 				}
 			} else {
-				ctx.JsonError(&response.Error{
+				ctx.JSONError(&response.Error{
 					Err:     err,
 					Message: "Session or Transaction expired. Please return to your app and try again.",
 				}, map[string]string{"error": "transaction_expired"})
@@ -369,7 +369,7 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 	ctx.Log("login", maskingOptions...)
 	// RateLimit
 	if err := h.RateLimit(ctx, 5, 1*time.Minute); err != nil {
-		ctx.JsonError(err, err.Message.Error())
+		ctx.JSONError(err, err.Message.Error())
 		return
 	}
 
@@ -378,7 +378,7 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 
 	if sid == "" || tid == "" {
 		// http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing session or transaction ID"),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -446,7 +446,7 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 			ExpiresAt:  &exp,
 		}
 		if err := h.userCredentialRepo.Create(ctx, &credential); err != nil {
-			ctx.JsonError(&response.Error{
+			ctx.JSONError(&response.Error{
 				Err:     err,
 				Message: response.SystemError,
 			}, response.SystemError.Error())
@@ -733,7 +733,7 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 
 	if sid == "" || tid == "" {
 		// http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing session or transaction ID"),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -752,7 +752,7 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 
 	// validate input
 	if username == "" || email == "" || password == "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing required fields"),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -760,15 +760,15 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	}
 
 	if len(password) < 6 {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("password too short"),
 			Message: "Password must be at least 6 characters",
 		}, response.MissingOrInvalidParameter.Error())
 		return
 	}
 
-	if !strings.Contains(email, "@") {
-		ctx.JsonError(&response.Error{
+	if !utils.IsEmail(email) {
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("invalid email format"),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -777,50 +777,20 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 
 	existing, _ := h.userRepo.FindByUsername(ctx, username)
 	if existing != nil {
-		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Username+already+taken#register", http.StatusFound)
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=username_already_taken#register", http.StatusFound)
-		return
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		// http.Redirect(w, r, "/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=Server+Error#register", http.StatusFound)
-		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=server_error#register", http.StatusFound)
 		return
 	}
 
 	dateNow := time.Now()
 
 	user := &models.User{
-		ID:       uuid.New().String(),
-		Username: username,
-		Email:    email,
-		// PasswordHash: string(hash),
+		ID:        uuid.New().String(),
+		Username:  username,
+		Email:     email,
 		CreatedAt: dateNow,
 		UpdatedAt: dateNow,
 		Status:    "",
 	}
-	userCredentialEmail := &models.UserCredential{
-		ID:         uuid.New().String(),
-		UserID:     user.ID,
-		Type:       "password",
-		Identifier: email,
-		Secret:     string(hash),
-		Verified:   true,
-		CreatedAt:  dateNow,
-		LastUsedAt: dateNow,
-	}
-	userCredentialUser := &models.UserCredential{
-		ID:         uuid.New().String(),
-		UserID:     user.ID,
-		Type:       "password",
-		Identifier: username,
-		Secret:     string(hash),
-		Verified:   true,
-		CreatedAt:  dateNow,
-		LastUsedAt: dateNow,
-	}
-
 	profile := &models.UserProfile{
 		UserID:            user.ID,
 		Name:              fmt.Sprintf("%s %s", givenName, familyName),
@@ -843,8 +813,8 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=database_error#register", http.StatusFound)
 		return
 	}
-	if err := h.userCredentialRepo.CreateMany(ctx, []*models.UserCredential{userCredentialUser, userCredentialEmail}); err != nil {
-		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=database_error#register", http.StatusFound)
+	if err := h.insertCredential(ctx, user.ID, username, email, password, dateNow); err != nil {
+		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=server_error#register", http.StatusFound)
 		return
 	}
 	if err := h.userProfileRepo.Create(ctx, profile); err != nil {
@@ -853,23 +823,40 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	}
 
 	// สร้างสำเร็จ ก็ให้ Login ผ่านต่อเลย
-	// sessionInfo := &models.SessionInfo{
-	// 	UserID:     user.ID,
-	// 	LoggedInAt: time.Now(),
-	// }
-	// h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
-
-	// // ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
-	// http.SetCookie(ctx.Res, &http.Cookie{
-	// 	Name:     "oidc_session",
-	// 	Value:    sid,
-	// 	Path:     "/",
-	// 	HttpOnly: true,
-	// 	MaxAge:   86400,
-	// })
-
-	// ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 	h.redirectToConsent(ctx, "register_success", user.ID, sid, tid)
+}
+
+func (h *OAuthHandler) insertCredential(ctx *kp.Ctx, id, username, email, secret string, dateNow time.Time) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	userCredentialEmail := &models.UserCredential{
+		ID:         uuid.New().String(),
+		UserID:     id,
+		Type:       "password",
+		Identifier: email,
+		Secret:     string(hash),
+		Verified:   true,
+		CreatedAt:  dateNow,
+		LastUsedAt: dateNow,
+	}
+	userCredentialUser := &models.UserCredential{
+		ID:         uuid.New().String(),
+		UserID:     id,
+		Type:       "password",
+		Identifier: username,
+		Secret:     string(hash),
+		Verified:   true,
+		CreatedAt:  dateNow,
+		LastUsedAt: dateNow,
+	}
+
+	if err := h.userCredentialRepo.CreateMany(ctx, []*models.UserCredential{userCredentialUser, userCredentialEmail}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
@@ -877,7 +864,7 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 	// 2. ดึง Transaction ก้อนเดิมออกมา
 	tx, err := h.transactionCache.GetTransaction(ctx.Context(), tid)
 	if err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Transaction expired"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -887,7 +874,7 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 	// 3. ปล่อย AuthCode ตามระบบ OAuth2
 	code, err := h.oauthService.GenerateAuthCode(ctx.Context(), sid, tx.ClientID, userID, tx.RedirectURI, tx.Nonce, tx.Scopes, tx.CodeChallenge, tx.CodeChallengeMethod)
 	if err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Failed to authorize: %s", err.Error()),
 			Message: response.ServerError,
 		}, response.ServerError.Error())
@@ -908,7 +895,7 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 
 	redirectURL, err := url.Parse(tx.RedirectURI)
 	if err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Invalid redirect_uri"),
 			Message: response.InvalidGrant,
 		}, response.InvalidGrant.Error())
@@ -930,7 +917,7 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 	tid := ctx.Query("tid")
 
 	if sid == "" || tid == "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Missing session or transaction"),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -945,7 +932,7 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 
 	tx, err := h.transactionCache.GetTransaction(ctx, tid)
 	if err != nil || tx == nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Transaction expired"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -954,7 +941,7 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 
 	client, err := h.clientRepo.FindByIDWithCache(ctx, tx.ClientID)
 	if err != nil || client == nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Invalid Client"),
 			Message: response.InvalidClient,
 		}, response.InvalidClient.Error())
@@ -987,7 +974,7 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 
 	if sid == "" || tid == "" {
 		// http.Error(w, "Missing mapping", http.StatusBadRequest)
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Missing session or transaction ID"),
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -1002,7 +989,7 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 
 	tx, err := h.transactionCache.GetTransaction(ctx, tid)
 	if err != nil || tx == nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Transaction expired"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1012,7 +999,7 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 	if action == "deny" {
 		h.transactionCache.DeleteTransaction(ctx, tid)
 		if tx.RedirectURI == "" {
-			ctx.JsonError(&response.Error{
+			ctx.JSONError(&response.Error{
 				Err:     fmt.Errorf("access denied by user"),
 				Message: response.AccessDenied,
 			}, response.AccessDenied.Error())
@@ -1039,7 +1026,7 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 
 	if err := ctx.Req.ParseForm(); err != nil {
 		ctx.Log("token")
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Invalid form data: %s", err.Error()),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1053,7 +1040,7 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	grantAllowed := slices.Contains(supportedGrants, grantType)
 	if !grantAllowed {
 		ctx.Log("token")
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Unsupported grant type: %s", grantType),
 			Message: response.UnsupportedResponseType,
 		}, response.UnsupportedResponseType.Error())
@@ -1157,7 +1144,7 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 			errorType = "invalid_scope"
 		}
 
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.InvalidRequest,
 		}, map[string]string{
@@ -1175,7 +1162,7 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 	ctx.Log("userinfo")
 	authHeader := ctx.Req.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Missing or invalid Bearer token"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1188,7 +1175,7 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 	claims, err := h.oauthService.ValidateAccessToken(ctx, tokenStr)
 	if err != nil {
 		// http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1204,7 +1191,7 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 	if encryptedUID != "" {
 		uid, err = h.oauthService.DecryptUserID(encryptedUID)
 		if err != nil {
-			ctx.JsonError(&response.Error{
+			ctx.JSONError(&response.Error{
 				Err:     fmt.Errorf("failed to decrypt user identity"),
 				Message: response.InvalidRequest,
 			}, response.InvalidRequest.Error())
@@ -1216,7 +1203,7 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 	}
 
 	if uid == "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("Invalid token claims: missing user identifier"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1228,7 +1215,7 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 	profile, _ := h.userProfileRepo.FindByID(ctx, uid)
 
 	if user == nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("User not found"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1355,7 +1342,7 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 	ctx.Log("revoke")
 
 	if err := ctx.Req.ParseForm(); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1384,7 +1371,7 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 	}
 
 	if token == "" || clientID == "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing token or client ID"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1410,7 +1397,7 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	ctx.Log("introspect")
 	if err := ctx.Req.ParseForm(); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1438,7 +1425,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	}
 
 	if clientID == "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing client credentials"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())
@@ -1454,7 +1441,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 
 	token := ctx.FormValue("token")
 	if token == "" {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing token"),
 			Message: response.InvalidRequest,
 		}, response.InvalidRequest.Error())

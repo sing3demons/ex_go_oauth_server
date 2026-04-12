@@ -46,7 +46,7 @@ func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
 
 	if err := ctx.Bind(&req); err != nil {
 		// http.Error(w, "Invalid input JSON", http.StatusBadRequest)
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -55,7 +55,7 @@ func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
 		}, response.ServerError.Error())
@@ -81,21 +81,21 @@ func (h *AdminHandler) CreateUser(ctx *kp.Ctx) {
 	}
 
 	if err := h.userRepo.Create(ctx, user); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
 		}, response.ServerError.Error())
 		return
 	}
 	if err := h.credentialRepo.Create(ctx, credential); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
 		}, response.ServerError.Error())
 		return
 	}
 	if err := h.profileRepo.Create(ctx, profile); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
 		}, response.ServerError.Error())
@@ -115,7 +115,7 @@ func (h *AdminHandler) CreateClient(ctx *kp.Ctx) {
 	ctx.Log("create_client")
 	var req CreateClientRequest
 	if err := ctx.Bind(&req); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -133,7 +133,7 @@ func (h *AdminHandler) CreateClient(ctx *kp.Ctx) {
 	}
 
 	if err := h.clientRepo.Create(ctx, client); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
 		}, response.ServerError.Error())
@@ -154,7 +154,7 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 	ctx.Log("admin_dashboard")
 	clients, err := h.clientRepo.FindAll(ctx)
 	if err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
 		}, response.ServerError.Error())
@@ -163,7 +163,7 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 
 	// tmpl, err := template.ParseFiles("templates/admin_dashboard.html")
 	// if err != nil {
-	// 	ctx.JsonError(&errors.Error{
+	// 	ctx.JSONError(&errors.Error{
 	// 		Err:           err,
 	// 		Message:       "Failed to load template",
 	// 		AppResultCode: response.ServerError.ResultCode(),
@@ -193,7 +193,7 @@ func (h *AdminHandler) DashboardUI(ctx *kp.Ctx) {
 func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 	ctx.Log("create_client_ui")
 	if err := ctx.Req.ParseForm(); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.MissingOrInvalidParameter,
 		}, response.MissingOrInvalidParameter.Error())
@@ -357,7 +357,7 @@ func (h *AdminHandler) CreateClientUI(ctx *kp.Ctx) {
 	}
 
 	if err := h.clientRepo.Create(ctx.Req.Context(), client); err != nil {
-		ctx.JsonError(&response.Error{
+		ctx.JSONError(&response.Error{
 			Err:     err,
 			Message: response.ServerError,
 		}, response.ServerError.Error())
