@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type OAuthHandler struct {
 	sessionCache       *redis_store.SessionCache
 	transactionCache   *redis_store.TransactionCache
 	auditRepo          *mongo_store.AuditRepository
+	rateLimitStore     ports.RateLimitStore
 	cfg                *config.Config
 }
 
@@ -49,6 +51,7 @@ func NewOAuthHandler(
 	sessionCache *redis_store.SessionCache,
 	transactionCache *redis_store.TransactionCache,
 	auditRepo *mongo_store.AuditRepository,
+	rateLimitStore ports.RateLimitStore,
 ) *OAuthHandler {
 	return &OAuthHandler{
 		cfg:                cfg,
@@ -61,6 +64,7 @@ func NewOAuthHandler(
 		sessionCache:       sessionCache,
 		transactionCache:   transactionCache,
 		auditRepo:          auditRepo,
+		rateLimitStore:     rateLimitStore,
 	}
 }
 
@@ -253,11 +257,12 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 				if redirectURI != "" {
 					u, _ := url.Parse(redirectURI)
 					q := u.Query()
-					if body == response.UnsupportedResponseType {
+					switch body {
+					case response.UnsupportedResponseType:
 						q.Set("error", "unsupported_response_type")
-					} else if body == response.InvalidScope {
+					case response.InvalidScope:
 						q.Set("error", "invalid_scope")
-					} else if body == response.SystemError {
+					case response.SystemError:
 						q.Set("error", "server_error")
 					}
 					q.Set("error_description", err.Error())
@@ -284,11 +289,12 @@ func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
 						if redirectURI != "" {
 							u, _ := url.Parse(redirectURI)
 							q := u.Query()
-							if body == response.UnsupportedResponseType {
+							switch body {
+							case response.UnsupportedResponseType:
 								q.Set("error", "unsupported_response_type")
-							} else if body == response.InvalidScope {
+							case response.InvalidScope:
 								q.Set("error", "invalid_scope")
-							} else if body == response.SystemError {
+							case response.SystemError:
 								q.Set("error", "server_error")
 							}
 							q.Set("error_description", err.Error())
@@ -349,18 +355,26 @@ func (h *OAuthHandler) findUserByUsernameOrEmail(ctx *kp.Ctx, identifier string)
 	return result, false, err
 }
 func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
-	ctx.Log("login", logger.MaskingOption{
-		MaskingField: "body.password",
-		MaskingType:  logger.MaskCustom,
-		Callback:     utils.MaskPassword,
-	}, logger.MaskingOption{
-		MaskingField: "body.username",
-		MaskingType:  logger.MaskCustom,
-		Callback:     utils.MaskUsernameOrEmail,
-	})
+	maskingOptions := []logger.MaskingOption{
+		{
+			MaskingField: "body.password",
+			MaskingType:  logger.MaskCustom,
+			Callback:     utils.MaskPassword,
+		}, {
+			MaskingField: "body.username",
+			MaskingType:  logger.MaskCustom,
+			Callback:     utils.MaskUsernameOrEmail,
+		}}
 
-	sid := ctx.Req.URL.Query().Get("sid")
-	tid := ctx.Req.URL.Query().Get("tid")
+	ctx.Log("login", maskingOptions...)
+	// RateLimit
+	if err := h.RateLimit(ctx, 5, 1*time.Minute); err != nil {
+		ctx.JsonError(err, err.Message.Error())
+		return
+	}
+
+	sid := ctx.Query("sid")
+	tid := ctx.Query("tid")
 
 	if sid == "" || tid == "" {
 		// http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
@@ -371,8 +385,8 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		return
 	}
 
-	username := ctx.Req.FormValue("username")
-	password := ctx.Req.FormValue("password")
+	username := ctx.FormValue("username")
+	password := ctx.FormValue("password")
 	// check if username is email format, if yes, find credential by email, otherwise by username
 
 	credential, isEmail, err := h.findUserByUsernameOrEmail(ctx, username)
@@ -380,9 +394,9 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		h.auditRepo.Save(ctx, &models.AuditLog{
 			UserID:     username, // Use username if ID unknown
 			Event:      "login_failed",
-			IPAddress:  ctx.Req.RemoteAddr,
-			UserAgent:  ctx.Req.UserAgent(),
-			DeviceInfo: ctx.Req.UserAgent(), // Raw for now, parser later
+			IPAddress:  ctx.IP(),
+			UserAgent:  ctx.UserAgent(),
+			DeviceInfo: ctx.UserAgent(), // Raw for now, parser later
 			Reason:     "user_not_found",
 		})
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=invalid_credentials", http.StatusFound)
@@ -394,9 +408,9 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		h.auditRepo.Save(ctx, &models.AuditLog{
 			UserID:     credential.UserID,
 			Event:      "login_failed",
-			IPAddress:  ctx.Req.RemoteAddr,
-			UserAgent:  ctx.Req.UserAgent(),
-			DeviceInfo: ctx.Req.UserAgent(),
+			IPAddress:  ctx.IP(),
+			UserAgent:  ctx.UserAgent(),
+			DeviceInfo: ctx.UserAgent(),
 			Reason:     "password_incorrect",
 		})
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=invalid_credentials", http.StatusFound)
@@ -452,11 +466,6 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		return
 	}
 
-	ua := user_agent.New(ctx.Req.UserAgent())
-	browser, version := ua.Browser()
-	os := ua.OS()
-	deviceInfo := fmt.Sprintf("%s (%s %s)", os, browser, version)
-
 	// 🔥 MFA Check
 	user, _ := h.userRepo.FindByID(ctx, credential.UserID)
 	if user != nil && user.MFAEnabled {
@@ -474,46 +483,24 @@ func (h *OAuthHandler) LoginSubmit(ctx *kp.Ctx) {
 		return
 	}
 
-	h.auditRepo.Save(ctx, &models.AuditLog{
-		UserID:     credential.UserID,
-		Event:      "login_success",
-		IPAddress:  ctx.Req.RemoteAddr,
-		UserAgent:  ctx.Req.UserAgent(),
-		DeviceInfo: deviceInfo,
-	})
+	h.redirectToConsent(ctx, "login_success", credential.UserID, sid, tid)
+}
+func (h *OAuthHandler) deviceInfo(ctx *kp.Ctx) string {
+	ua := user_agent.New(ctx.UserAgent())
+	browser, version := ua.Browser()
+	os := ua.OS()
+	deviceInfo := fmt.Sprintf("%s (%s %s)", os, browser, version)
+	return deviceInfo
 
-	sessionInfo := &models.SessionInfo{
-		SID:            sid,
-		UserID:         credential.UserID,
-		LoggedInAt:     time.Now(),
-		LastActivityAt: time.Now(),
-		IPAddress:      ctx.Req.RemoteAddr,
-		UserAgent:      ctx.Req.UserAgent(),
-		DeviceInfo:     deviceInfo,
-	}
-	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
-
-	// ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
-	http.SetCookie(ctx.Res, &http.Cookie{
-		Name:     "oidc_session",
-		Value:    sid,
-		Path:     "/",
-		HttpOnly: true,
-		// Secure:   true,                 // ← เพิ่ม: HTTPS only
-		SameSite: http.SameSiteLaxMode, // ← เพิ่ม: ป้องกัน CSRF
-		MaxAge:   86400,
-	})
-
-	ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
 }
 
 func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 	ctx.Log("otp_verify")
 
-	sid := ctx.Req.FormValue("sid")
-	tid := ctx.Req.FormValue("tid")
-	username := ctx.Req.FormValue("username")
-	otpCode := ctx.Req.FormValue("otp")
+	sid := ctx.FormValue("sid")
+	tid := ctx.FormValue("tid")
+	username := ctx.FormValue("username")
+	otpCode := ctx.FormValue("otp")
 
 	if sid == "" || tid == "" || username == "" || otpCode == "" {
 		ctx.RenderTemplate("templates/otp.html", map[string]any{
@@ -623,36 +610,38 @@ func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 	h.userCredentialRepo.DeleteByID(ctx, credential.ID)
 
 	// 5. Success Logic
-	ua := user_agent.New(ctx.Req.UserAgent())
-	browser, version := ua.Browser()
-	os := ua.OS()
-	deviceInfo := fmt.Sprintf("%s (%s %s)", os, browser, version)
+	h.redirectToConsent(ctx, "login_success_otp", credential.UserID, sid, tid)
+}
 
+func (h *OAuthHandler) redirectToConsent(ctx *kp.Ctx, event, uid, sid, tid string) {
+	deviceInfo := h.deviceInfo(ctx)
 	h.auditRepo.Save(ctx, &models.AuditLog{
-		UserID:     user.ID,
-		Event:      "login_success_otp",
-		IPAddress:  ctx.Req.RemoteAddr,
-		UserAgent:  ctx.Req.UserAgent(),
+		UserID:     uid,
+		Event:      event,
+		IPAddress:  ctx.IP(),
+		UserAgent:  ctx.UserAgent(),
 		DeviceInfo: deviceInfo,
 	})
 
 	sessionInfo := &models.SessionInfo{
 		SID:            sid,
-		UserID:         user.ID,
+		UserID:         uid,
 		LoggedInAt:     time.Now(),
 		LastActivityAt: time.Now(),
-		IPAddress:      ctx.Req.RemoteAddr,
-		UserAgent:      ctx.Req.UserAgent(),
+		IPAddress:      ctx.IP(),
+		UserAgent:      ctx.UserAgent(),
 		DeviceInfo:     deviceInfo,
 	}
 	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
 
+	// ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
 	http.SetCookie(ctx.Res, &http.Cookie{
 		Name:     "oidc_session",
 		Value:    sid,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		// Secure:   true,                 // ← เพิ่ม: HTTPS only
+		SameSite: http.SameSiteLaxMode, // ← เพิ่ม: ป้องกัน CSRF
 		MaxAge:   86400,
 	})
 
@@ -662,9 +651,9 @@ func (h *OAuthHandler) OtpVerifySubmit(ctx *kp.Ctx) {
 func (h *OAuthHandler) OtpResendSubmit(ctx *kp.Ctx) {
 	ctx.Log("otp_resend")
 
-	sid := ctx.Req.FormValue("sid")
-	tid := ctx.Req.FormValue("tid")
-	username := ctx.Req.FormValue("username")
+	sid := ctx.FormValue("sid")
+	tid := ctx.FormValue("tid")
+	username := ctx.FormValue("username")
 
 	if sid == "" || tid == "" || username == "" {
 		ctx.JSON(http.StatusBadRequest, map[string]any{"error": "missing_parameters"})
@@ -739,8 +728,8 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	}
 	ctx.Log("register", maskRegister...)
 
-	sid := ctx.Req.URL.Query().Get("sid")
-	tid := ctx.Req.URL.Query().Get("tid")
+	sid := ctx.Query("sid")
+	tid := ctx.Query("tid")
 
 	if sid == "" || tid == "" {
 		// http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
@@ -752,14 +741,14 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		return
 	}
 
-	username := ctx.Req.FormValue("username")
-	email := ctx.Req.FormValue("email")
-	password := ctx.Req.FormValue("password")
-	givenName := ctx.Req.FormValue("given_name")
-	familyName := ctx.Req.FormValue("family_name")
-	nickname := ctx.Req.FormValue("nickname")
-	gender := ctx.Req.FormValue("gender")
-	phoneNumber := ctx.Req.FormValue("phone_number")
+	username := ctx.FormValue("username")
+	email := ctx.FormValue("email")
+	password := ctx.FormValue("password")
+	givenName := ctx.FormValue("given_name")
+	familyName := ctx.FormValue("family_name")
+	nickname := ctx.FormValue("nickname")
+	gender := ctx.FormValue("gender")
+	phoneNumber := ctx.FormValue("phone_number")
 
 	// validate input
 	if username == "" || email == "" || password == "" {
@@ -864,22 +853,23 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	}
 
 	// สร้างสำเร็จ ก็ให้ Login ผ่านต่อเลย
-	sessionInfo := &models.SessionInfo{
-		UserID:     user.ID,
-		LoggedInAt: time.Now(),
-	}
-	h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
+	// sessionInfo := &models.SessionInfo{
+	// 	UserID:     user.ID,
+	// 	LoggedInAt: time.Now(),
+	// }
+	// h.sessionCache.SetSession(ctx, sid, sessionInfo, 24*time.Hour)
 
-	// ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
-	http.SetCookie(ctx.Res, &http.Cookie{
-		Name:     "oidc_session",
-		Value:    sid,
-		Path:     "/",
-		HttpOnly: true,
-		MaxAge:   86400,
-	})
+	// // ฝัง Cookie เพื่อทำ SSO ทะลุ Flow
+	// http.SetCookie(ctx.Res, &http.Cookie{
+	// 	Name:     "oidc_session",
+	// 	Value:    sid,
+	// 	Path:     "/",
+	// 	HttpOnly: true,
+	// 	MaxAge:   86400,
+	// })
 
-	ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+	// ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+	h.redirectToConsent(ctx, "register_success", user.ID, sid, tid)
 }
 
 func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
@@ -936,8 +926,8 @@ func (h *OAuthHandler) completeAuth(ctx *kp.Ctx, sid, tid, userID string) {
 func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 	ctx.Log("consent_ui")
 
-	sid := ctx.Req.URL.Query().Get("sid")
-	tid := ctx.Req.URL.Query().Get("tid")
+	sid := ctx.Query("sid")
+	tid := ctx.Query("tid")
 
 	if sid == "" || tid == "" {
 		ctx.JsonError(&response.Error{
@@ -991,9 +981,9 @@ func (h *OAuthHandler) ConsentUI(ctx *kp.Ctx) {
 func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 	ctx.Log("consent_submit")
 
-	sid := ctx.Req.FormValue("sid")
-	tid := ctx.Req.FormValue("tid")
-	action := ctx.Req.FormValue("action")
+	sid := ctx.FormValue("sid")
+	tid := ctx.FormValue("tid")
+	action := ctx.FormValue("action")
 
 	if sid == "" || tid == "" {
 		// http.Error(w, "Missing mapping", http.StatusBadRequest)
@@ -1022,9 +1012,6 @@ func (h *OAuthHandler) ConsentSubmit(ctx *kp.Ctx) {
 	if action == "deny" {
 		h.transactionCache.DeleteTransaction(ctx, tid)
 		if tx.RedirectURI == "" {
-			// w.Header().Set("Content-Type", "application/json")
-			// json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
-			// ctx.JSON(http.StatusUnauthorized, map[string]string{"error": "access_denied"})
 			ctx.JsonError(&response.Error{
 				Err:     fmt.Errorf("access denied by user"),
 				Message: response.AccessDenied,
@@ -1059,17 +1046,11 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 		return
 	}
 
-	grantType := ctx.Req.FormValue("grant_type")
+	grantType := ctx.FormValue("grant_type")
 
 	// Validate grant_type against server-supported list from config
-	supportedGrants := h.cfg.Oidc.SupportedGrantTypes
-	grantAllowed := false
-	for _, g := range supportedGrants {
-		if g == grantType {
-			grantAllowed = true
-			break
-		}
-	}
+	supportedGrants := h.cfg.GetArray("oidc.grant_types_supported")
+	grantAllowed := slices.Contains(supportedGrants, grantType)
 	if !grantAllowed {
 		ctx.Log("token")
 		ctx.JsonError(&response.Error{
@@ -1081,9 +1062,9 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 
 	ctx.Log("token_" + grantType)
 
-	code := ctx.Req.FormValue("code")
-	clientID := ctx.Req.FormValue("client_id")
-	clientSecret := ctx.Req.FormValue("client_secret")
+	code := ctx.FormValue("code")
+	clientID := ctx.FormValue("client_id")
+	clientSecret := ctx.FormValue("client_secret")
 
 	// Detect which auth method the client used
 	var usedAuthMethod string
@@ -1105,29 +1086,52 @@ func (h *OAuthHandler) Token(ctx *kp.Ctx) {
 	var resp map[string]any
 	var err error
 
+	type TokenBody struct {
+		GrantType    string `json:"grant_type"`
+		Code         string `json:"code,omitempty"`
+		RedirectURI  string `json:"redirect_uri,omitempty"`
+		ClientID     string `json:"client_id,omitempty"`
+		ClientSecret string `json:"client_secret,omitempty"`
+		CodeVerifier string `json:"code_verifier,omitempty"`
+		RefreshToken string `json:"refresh_token,omitempty"`
+		Scope        string `json:"scope,omitempty"`
+
+		// For Token Exchange
+		SubjectToken     string `json:"subject_token,omitempty"`
+		SubjectTokenType string `json:"subject_token_type,omitempty"`
+		Audience         string `json:"audience,omitempty"`
+
+		// For JWT Bearer
+		Assertion string `json:"assertion,omitempty"`
+	}
+
+	body := TokenBody{
+		RedirectURI:      ctx.FormValue("redirect_uri"),
+		CodeVerifier:     ctx.FormValue("code_verifier"),
+		RefreshToken:     ctx.FormValue("refresh_token"),
+		Scope:            ctx.FormValue("scope"),
+		SubjectToken:     ctx.FormValue("subject_token"),
+		SubjectTokenType: ctx.FormValue("subject_token_type"),
+		Audience:         ctx.FormValue("audience"),
+		Assertion:        ctx.FormValue("assertion"),
+	}
+
 	switch grantType {
 	case "authorization_code":
-		redirectURI := ctx.Req.FormValue("redirect_uri")
-		codeVerifier := ctx.Req.FormValue("code_verifier")
-		resp, err = h.oauthService.ExchangeToken(ctx, code, clientID, clientSecret, redirectURI, codeVerifier, usedAuthMethod)
+		resp, err = h.oauthService.ExchangeToken(ctx, code, clientID, clientSecret, body.RedirectURI, body.CodeVerifier, usedAuthMethod)
 	case "refresh_token":
-		refreshToken := ctx.Req.FormValue("refresh_token")
-		resp, err = h.oauthService.RefreshToken(ctx, refreshToken, clientID, clientSecret, usedAuthMethod)
+		resp, err = h.oauthService.RefreshToken(ctx, body.RefreshToken, clientID, clientSecret, usedAuthMethod)
 	case "client_credentials":
-		scopes := strings.Fields(ctx.Req.FormValue("scope"))
+		scopes := strings.Fields(body.Scope)
 		resp, err = h.oauthService.ClientCredentials(ctx, clientID, clientSecret, scopes, usedAuthMethod)
 	case "urn:ietf:params:oauth:grant-type:token-exchange":
-		subjectToken := ctx.Req.FormValue("subject_token")
-		subjectTokenType := ctx.Req.FormValue("subject_token_type")
-		audience := ctx.Req.FormValue("audience")
-		scopes := strings.Fields(ctx.Req.FormValue("scope"))
-		resp, err = h.oauthService.TokenExchange(ctx, subjectToken, subjectTokenType, clientID, clientSecret, scopes, audience, usedAuthMethod)
+		scopes := strings.Fields(body.Scope)
+		resp, err = h.oauthService.TokenExchange(ctx, body.SubjectToken, body.SubjectTokenType, clientID, clientSecret, scopes, body.Audience, usedAuthMethod)
 	case "urn:ietf:params:oauth:grant-type:jwt-bearer":
-		assertion := ctx.Req.FormValue("assertion")
-		if assertion == "" {
+		if body.Assertion == "" {
 			err = errors.New("invalid_request: missing assertion parameter")
 		} else {
-			resp, err = h.oauthService.JWTBearer(ctx, assertion)
+			resp, err = h.oauthService.JWTBearer(ctx, body.Assertion)
 		}
 	}
 
@@ -1268,9 +1272,9 @@ func (h *OAuthHandler) UserInfo(ctx *kp.Ctx) {
 func (h *OAuthHandler) Logout(ctx *kp.Ctx) {
 	ctx.Log("logout")
 
-	idTokenHint := ctx.Req.URL.Query().Get("id_token_hint")
-	postLogoutRedirectURI := ctx.Req.URL.Query().Get("post_logout_redirect_uri")
-	state := ctx.Req.URL.Query().Get("state")
+	idTokenHint := ctx.Query("id_token_hint")
+	postLogoutRedirectURI := ctx.Query("post_logout_redirect_uri")
+	state := ctx.Query("state")
 
 	var redirectURI string
 	var client *models.Client
@@ -1298,13 +1302,7 @@ func (h *OAuthHandler) Logout(ctx *kp.Ctx) {
 
 	// 2. ตรวจสอบ post_logout_redirect_uri (ต้องมี idTokenHint เสมอเพื่อความปลอดภัย)
 	if postLogoutRedirectURI != "" && client != nil {
-		valid := false
-		for _, uri := range client.PostLogoutRedirectURIs {
-			if uri == postLogoutRedirectURI {
-				valid = true
-				break
-			}
-		}
+		valid := slices.Contains(client.PostLogoutRedirectURIs, postLogoutRedirectURI)
 		if valid {
 			redirectURI = postLogoutRedirectURI
 			if state != "" {
@@ -1364,9 +1362,9 @@ func (h *OAuthHandler) Revoke(ctx *kp.Ctx) {
 		return
 	}
 
-	token := ctx.Req.FormValue("token")
-	clientID := ctx.Req.FormValue("client_id")
-	clientSecret := ctx.Req.FormValue("client_secret")
+	token := ctx.FormValue("token")
+	clientID := ctx.FormValue("client_id")
+	clientSecret := ctx.FormValue("client_secret")
 
 	// Detect auth method
 	var usedAuthMethod string
@@ -1420,8 +1418,8 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 	}
 
 	// 1. Detect and parse client credentials
-	clientID := ctx.Req.FormValue("client_id")
-	clientSecret := ctx.Req.FormValue("client_secret")
+	clientID := ctx.FormValue("client_id")
+	clientSecret := ctx.FormValue("client_secret")
 
 	var usedAuthMethod string
 	basicID, basicSecret, hasBasicAuth := ctx.Req.BasicAuth()
@@ -1454,7 +1452,7 @@ func (h *OAuthHandler) Introspect(ctx *kp.Ctx) {
 		return
 	}
 
-	token := ctx.Req.FormValue("token")
+	token := ctx.FormValue("token")
 	if token == "" {
 		ctx.JsonError(&response.Error{
 			Err:     fmt.Errorf("missing token"),

@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/sing3demons/oauth_server/pkg/kp"
+	"github.com/sing3demons/oauth_server/pkg/response"
 )
 
 // BasicAuthMiddleware ปกป้อง Endpoint ด้วย HTTP Basic Authentication
@@ -50,4 +53,24 @@ func CORSMiddleware() kp.Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func (h *OAuthHandler) RateLimit(ctx *kp.Ctx, limit int, window time.Duration) *response.Error {
+	// ดึง IP Address ของผู้ขอใช้ (พื้นฐาน)
+	ip := ctx.IP()
+
+	key := fmt.Sprintf("ratelimit:login:%s", ip)
+	count, err := h.rateLimitStore.Increment(ctx, key, window)
+	if err != nil {
+		// หาก Redis มีปัญหา ให้ปล่อยผ่านก่อนเพื่อไม่ให้ระบบล่ม (Fail Open)
+		return nil
+	}
+
+	if count > limit {
+		return &response.Error{
+			Err:     fmt.Errorf("too many requests: %d/%d", count, limit),
+			Message: response.TooManyRequest,
+		}
+	}
+	return nil
 }

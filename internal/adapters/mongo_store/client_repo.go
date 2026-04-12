@@ -3,6 +3,9 @@ package mongo_store
 import (
 	"context"
 	"encoding/json"
+	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/sing3demons/oauth_server/pkg/mlog"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type clientCacheEntry struct {
@@ -28,11 +32,55 @@ type ClientRepository struct {
 }
 
 func NewClientRepository(db *mongo.Database, redisClient *redis.Client) *ClientRepository {
-	return &ClientRepository{
+	clientRepository := &ClientRepository{
 		col:     db.Collection("clients"),
 		redis:   redisClient,
 		l1Cache: make(map[string]clientCacheEntry),
 	}
+
+	clientID := os.Getenv("SYSTEM_CLIENT_ID")
+	clientSecret := os.Getenv("SYSTEM_CLIENT_SECRET")
+	redirectURI := os.Getenv("SYSTEM_REDIRECT_URI")
+	client_name := os.Getenv("SYSTEM_CLIENT_NAME")
+	// auto insert client document for testing
+	if clientID != "" && clientSecret != "" && redirectURI != "" && client_name != "" {
+		allowed_scopes := []string{"openid", "profile", "email", "offline_access"}
+		filter := bson.M{"_id": clientID}
+
+		count, err := clientRepository.col.CountDocuments(context.Background(), filter)
+		if err != nil {
+			log.Printf("Error checking client existence: %v", err)
+		} else if count == 0 {
+			secretHash := clientSecret
+			hash, err := bcrypt.GenerateFromPassword([]byte(clientSecret), bcrypt.DefaultCost)
+			if err == nil {
+				secretHash = string(hash)
+			}
+			testClient := &models.Client{
+				ClientID:                 clientID,
+				ClientSecretHash:         secretHash,
+				RedirectURIs:             strings.Split(redirectURI, ","),
+				GrantTypes:               []string{"authorization_code", "refresh_token", "client_credentials", "urn:ietf:params:oauth:grant-type:token-exchange"},
+				ClientType:               "confidential",
+				AllowedScopes:            allowed_scopes,
+				ClientName:               client_name,
+				RequirePKCE:              true,
+				IDTokenSignedResponseAlg: "RS256",
+				SubjectType:              "public",
+				TokenEndpointAuthMethod:  "client_secret_basic",
+			}
+			if err := clientRepository.Create(context.Background(), testClient); err != nil {
+				log.Printf("Error inserting test client: %v", err)
+			} else {
+				log.Printf("Test client with ID %s created successfully", clientID)
+			}
+		} else {
+			log.Printf("Test client with ID %s already exists", clientID)
+		}
+
+	}
+
+	return clientRepository
 }
 
 func (r *ClientRepository) Create(ctx context.Context, client *models.Client) error {

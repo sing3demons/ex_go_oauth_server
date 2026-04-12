@@ -77,3 +77,7 @@ type TransactionCache interface {
 	GetTransaction(ctx context.Context, txID string) (*models.AuthTransaction, error)
 	DeleteTransaction(ctx context.Context, txID string) error
 }
+
+type RateLimitStore interface {
+	Increment(ctx context.Context, key string, expiration time.Duration) (int, error)
+}

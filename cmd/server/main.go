@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/sing3demons/oauth_server/internal/adapters/mongo_store"
 	"github.com/sing3demons/oauth_server/internal/adapters/redis_store"
@@ -58,6 +57,15 @@ func main() {
 	keyService := services.NewKeyService(keyRepo, keyCache, cfg.KeyRotationDuration, cfg.KeyMaxRetentionCount, supportedAlgs)
 	oauthService := services.NewOAuthService(cfg, clientRepo, authCodeCache, rtRepo, keyService, userRepo, profileRepo)
 	otpService := services.NewOTPService(credentialRepo, cfg.Issuer)
+	oauthHandler := handlers.NewOAuthHandler(cfg, clientRepo, userRepo, profileRepo, oauthService, otpService, credentialRepo, sessionCache, transactionCache, auditRepo, rateLimitCache)
+	accountHandler := handlers.NewAccountHandler(sessionCache, auditRepo, userRepo, credentialRepo)
+	mfaHandler := handlers.NewMFAHandler(oauthHandler)
+
+	webauthnService, err := services.NewWebAuthnService(cfg, userRepo, credentialRepo)
+	if err != nil {
+		log.Fatalf("Failed to initialize WebAuthnService: %v", err)
+	}
+	webauthnHandler := handlers.NewWebAuthnHandler(oauthHandler, webauthnService)
 
 	// Start Key generation or fetching
 	ctx := context.Background()
@@ -72,18 +80,9 @@ func main() {
 	discoveryHandler := handlers.NewDiscoveryHandler(cfg, keyService)
 	app.GET("/.well-known/openid-configuration", discoveryHandler.OpenIDConfiguration)
 	app.GET("/jwks.json", discoveryHandler.JWKS)
-	oauthHandler := handlers.NewOAuthHandler(cfg, clientRepo, userRepo, profileRepo, oauthService, otpService, credentialRepo, sessionCache, transactionCache, auditRepo)
-	accountHandler := handlers.NewAccountHandler(sessionCache, auditRepo, userRepo, credentialRepo)
-	mfaHandler := handlers.NewMFAHandler(oauthHandler)
-
-	webauthnService, err := services.NewWebAuthnService(cfg, userRepo, credentialRepo)
-	if err != nil {
-		log.Fatalf("Failed to initialize WebAuthnService: %v", err)
-	}
-	webauthnHandler := handlers.NewWebAuthnHandler(oauthHandler, webauthnService)
 
 	app.GET("/authorize", oauthHandler.Authorize)
-	app.POST("/login", oauthHandler.LoginSubmit, middleware.RateLimitMiddleware(rateLimitCache, 5, 1*time.Minute))
+	app.POST("/login", oauthHandler.LoginSubmit)
 	app.POST("/login/otp", oauthHandler.OtpVerifySubmit)
 	app.POST("/login/otp/resend", oauthHandler.OtpResendSubmit)
 	app.POST("/register", oauthHandler.RegisterSubmit)
@@ -145,13 +144,6 @@ func main() {
 	})
 
 	log.Printf("Starting OIDC Server on port %s", cfg.Port)
-
-	// ใช้ LoggerMiddleware หุ้ม Router ทั้งหมดก่อน Listen
-	// loggedMux := middleware.LoggerMiddleware(mux, cfg, detailSlogAdapter, summarySlogAdapter, maskingSvc)
-
-	// if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), loggedMux); err != nil {
-	// 	log.Fatalf("Server failed: %v", err)
-	// }
 
 	app.Use(middleware.GzipMiddleware)
 	app.Use(middleware.SecurityHeadersMiddleware)

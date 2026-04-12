@@ -126,11 +126,12 @@ func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any) {
 		c.log.Update("RecordName", cmd)
 	}
 
-	if cmd == "authorize" {
+	switch cmd {
+	case "authorize":
 		if cookie, err := c.Req.Cookie("oidc_session"); err == nil && cookie.Value != "" {
 			c.sessionId = cookie.Value
 		}
-	} else if cmd == "token_authorization_code" {
+	case "token_authorization_code":
 		code := c.Req.FormValue("code")
 		if code != "" && len(code) <= 22 {
 			c.sessionId = code[:22]
@@ -157,6 +158,25 @@ func (c *Ctx) ensureRequestMetadata(cmd string, body map[string]any) {
 	c.Req = c.Req.WithContext(ctx)
 }
 
+func (c *Ctx) UpdateSessionId(val string) string {
+	c.sessionId = val
+	c.log.Update("SessionId", c.sessionId)
+	ctx := c.Req.Context()
+	ctx = context.WithValue(ctx, SessionID, c.sessionId)
+	c.Req = c.Req.WithContext(ctx)
+
+	return c.sessionId
+}
+
+func (c *Ctx) UpdateTransactionId(val string) string {
+	c.transactionId = val
+	c.log.Update("TransactionId", c.transactionId)
+	ctx := c.Req.Context()
+	ctx = context.WithValue(ctx, TransactionID, c.transactionId)
+	c.Req = c.Req.WithContext(ctx)
+
+	return c.transactionId
+}
 func (c *Ctx) resolveRequestID(headerName, paramName string, body map[string]any) string {
 	if value := c.Req.Header.Get(headerName); value != "" {
 		return value
@@ -169,7 +189,6 @@ func (c *Ctx) resolveRequestID(headerName, paramName string, body map[string]any
 	}
 	return uuid.New().String()
 }
-
 func (c *Ctx) resolveSessionId(headerName, paramName string, body map[string]any) string {
 	if value := c.Req.Header.Get(headerName); value != "" {
 		return value
@@ -335,6 +354,22 @@ func (c *Ctx) Bind(v any) error {
 	default:
 		return fmt.Errorf("unsupported content type: %s", contentType)
 	}
+}
+func (c *Ctx) Query(key string) string {
+	return c.Req.URL.Query().Get(key)
+}
+func (c *Ctx) FormValue(key string) string {
+	return c.Req.FormValue(key)
+}
+func (c *Ctx) UserAgent() string {
+	return c.Req.UserAgent()
+}
+func (c *Ctx) IP() string {
+	ip := c.Req.RemoteAddr
+	if forwarded := c.Req.Header.Get("X-Forwarded-For"); forwarded != "" {
+		ip = forwarded
+	}
+	return ip
 }
 
 // parseJSON parses JSON content
@@ -522,7 +557,6 @@ func (c *Ctx) GetFiles(name string) ([]*multipart.FileHeader, error) {
 func (c *Ctx) Context() context.Context {
 	return c.Req.Context()
 }
-
 func (c *Ctx) Done() <-chan struct{} {
 	return c.Context().Done()
 }
@@ -536,11 +570,14 @@ func (c *Ctx) Value(key any) any {
 	return c.Context().Value(key)
 }
 
+func (c *Ctx) SetHeader(key, value string) {
+	c.Res.Header().Set(key, value)
+}
 func (c *Ctx) JSON(code int, v any, maskOptions ...logger.MaskingOption) error {
 	c.ensureRequestMetadata(c.cmd, nil)
-	c.Res.Header().Set("Content-Type", "application/json")
-	c.Res.Header().Set("X-Session-ID", c.sessionId)
-	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
+	c.SetHeader("Content-Type", "application/json")
+	c.SetHeader("X-Session-ID", c.sessionId)
+	c.SetHeader("X-Transaction-ID", c.transactionId)
 	c.Res.WriteHeader(code)
 	json.NewEncoder(c.Res).Encode(v)
 
@@ -575,9 +612,9 @@ func (c *Ctx) JSON(code int, v any, maskOptions ...logger.MaskingOption) error {
 
 func (c *Ctx) JsonError(err *response.Error, body any) error {
 	c.ensureRequestMetadata(c.cmd, nil)
-	c.Res.Header().Set("Content-Type", "application/json")
-	c.Res.Header().Set("X-Session-ID", c.sessionId)
-	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
+	c.SetHeader("Content-Type", "application/json")
+	c.SetHeader("X-Session-ID", c.sessionId)
+	c.SetHeader("X-Transaction-ID", c.transactionId)
 	c.Res.WriteHeader(err.LogDependencyMetadata().AppResultHttpStatus)
 	json.NewEncoder(c.Res).Encode(body)
 
@@ -594,8 +631,8 @@ func (c *Ctx) JsonError(err *response.Error, body any) error {
 }
 
 func (c *Ctx) Redirect(urlStr string, code int) {
-	c.Res.Header().Set("X-Session-ID", c.sessionId)
-	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
+	c.SetHeader("X-Session-ID", c.sessionId)
+	c.SetHeader("X-Transaction-ID", c.transactionId)
 	c.ensureRequestMetadata(c.cmd, nil)
 	http.Redirect(c.Res, c.Req, urlStr, code)
 	c.log.Info(logAction.OUTBOUND("redirect: command-> "+c.cmd+" | status-> "+fmt.Sprint(code)+" | location-> "+urlStr), map[string]any{
@@ -660,7 +697,7 @@ func (c *Ctx) GetValUniversal(data any, key string) (string, bool) {
 
 	// case: struct
 	v := reflect.ValueOf(data)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 
@@ -677,11 +714,11 @@ func (c *Ctx) GetValUniversal(data any, key string) (string, bool) {
 }
 
 func (c *Ctx) RenderTemplate(templateName string, data any, code int) error {
-	c.Res.Header().Set("Content-Type", "text/html")
-	c.Res.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	c.Res.Header().Set("Pragma", "no-cache")
-	c.Res.Header().Set("X-Session-ID", c.sessionId)
-	c.Res.Header().Set("X-Transaction-ID", c.transactionId)
+	c.SetHeader("Content-Type", "text/html")
+	c.SetHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.SetHeader("Pragma", "no-cache")
+	c.SetHeader("X-Session-ID", c.sessionId)
+	c.SetHeader("X-Transaction-ID", c.transactionId)
 
 	c.ensureRequestMetadata(c.cmd, nil)
 	c.log.Info(logAction.OUTBOUND("render template: command-> "+c.cmd+" | template-> "+templateName), map[string]any{
