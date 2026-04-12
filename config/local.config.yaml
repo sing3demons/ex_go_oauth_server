@@ -1,5 +1,5 @@
 app:
-  name: "OAuth"
+  name: "oauth-oidc-service"
   component-name: 'oauth oidc'
   description: "OAuth Service"
   version: "1.0.0"
@@ -8,6 +8,7 @@ app:
   key-rotation-duration: "24h"
   key-grace-period: "1h"
   key-max-retention-count: 5
+  msisdn: "^((0|66)(\\d){9}|(85620)(\\d){8})$"
 
 oidc:
   scopes_supported:

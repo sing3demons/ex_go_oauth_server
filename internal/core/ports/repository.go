@@ -24,7 +24,7 @@ type UserProfileRepository interface {
 
 type UserCredentialRepository interface {
 	Create(ctx context.Context, credential *models.UserCredential) error
-	CreateMany(ctx context.Context, credentials []*models.UserCredential) error
+	CreateMany(ctx context.Context, credentials []models.UserCredential) error
 	FindByUsernamePassword(ctx context.Context, username string) (*models.UserCredential, error)
 	FindByEmailPassword(ctx context.Context, email string) (*models.UserCredential, error)
 	FindByID(ctx context.Context, id string) (*models.UserCredential, error)

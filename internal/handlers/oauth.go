@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -351,6 +352,7 @@ func (h *OAuthHandler) findUserByUsernameOrEmail(ctx *kp.Ctx, identifier string)
 		result, err := h.userCredentialRepo.FindByEmailPassword(ctx, identifier)
 		return result, true, err
 	}
+
 	result, err := h.userCredentialRepo.FindByUsernamePassword(ctx, identifier)
 	return result, false, err
 }
@@ -732,7 +734,6 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	tid := ctx.Query("tid")
 
 	if sid == "" || tid == "" {
-		// http.Error(w, "Missing session or transaction ID", http.StatusBadRequest)
 		ctx.JSONError(&response.Error{
 			Err:     fmt.Errorf("missing session or transaction ID"),
 			Message: response.MissingOrInvalidParameter,
@@ -805,7 +806,12 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		UpdatedAt:         dateNow,
 	}
 	if phoneNumber != "" {
-		profile.PhoneNumber = &phoneNumber
+		if phoneNum, valid := h.isPhoneNumberValid(phoneNumber); valid {
+			profile.PhoneNumber = &phoneNum
+			phoneNumber = phoneNum
+		} else {
+			phoneNumber = ""
+		}
 	}
 
 	if err := h.userRepo.Create(ctx, user); err != nil {
@@ -813,7 +819,7 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=database_error#register", http.StatusFound)
 		return
 	}
-	if err := h.insertCredential(ctx, user.ID, username, email, password, dateNow); err != nil {
+	if err := h.insertCredential(ctx, user.ID, username, email, phoneNumber, password, dateNow); err != nil {
 		ctx.Redirect("/authorize?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid)+"&error=server_error#register", http.StatusFound)
 		return
 	}
@@ -826,11 +832,26 @@ func (h *OAuthHandler) RegisterSubmit(ctx *kp.Ctx) {
 	h.redirectToConsent(ctx, "register_success", user.ID, sid, tid)
 }
 
-func (h *OAuthHandler) insertCredential(ctx *kp.Ctx, id, username, email, secret string, dateNow time.Time) error {
+func (h *OAuthHandler) isPhoneNumberValid(phoneNumber string) (string, bool) {
+	if strings.HasPrefix(phoneNumber, "+") {
+		phoneNumber = strings.ReplaceAll(phoneNumber, "+", "")
+	}
+	phoneNumber = strings.ReplaceAll(phoneNumber, "-", "")
+	phoneNumber = strings.ReplaceAll(phoneNumber, " ", "")
+	msisdnPattern := h.cfg.GetString("app.msisdn")
+	if matched, _ := regexp.MatchString(msisdnPattern, phoneNumber); matched {
+		return phoneNumber, true
+	}
+	return "", false
+}
+
+func (h *OAuthHandler) insertCredential(ctx *kp.Ctx, id, username, email, phoneNumber, secret string, dateNow time.Time) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
+
+	credentials := []models.UserCredential{}
 
 	userCredentialEmail := &models.UserCredential{
 		ID:         uuid.New().String(),
@@ -852,8 +873,23 @@ func (h *OAuthHandler) insertCredential(ctx *kp.Ctx, id, username, email, secret
 		CreatedAt:  dateNow,
 		LastUsedAt: dateNow,
 	}
+	credentials = append(credentials, *userCredentialEmail, *userCredentialUser)
 
-	if err := h.userCredentialRepo.CreateMany(ctx, []*models.UserCredential{userCredentialUser, userCredentialEmail}); err != nil {
+	if phoneNumber != "" {
+		userCredentialPhone := &models.UserCredential{
+			ID:         uuid.New().String(),
+			UserID:     id,
+			Type:       "password",
+			Identifier: phoneNumber,
+			Secret:     string(hash),
+			Verified:   true,
+			CreatedAt:  dateNow,
+			LastUsedAt: dateNow,
+		}
+		credentials = append(credentials, *userCredentialPhone)
+	}
+
+	if err := h.userCredentialRepo.CreateMany(ctx, credentials); err != nil {
 		return err
 	}
 	return nil

@@ -734,6 +734,7 @@ func (c *Ctx) RenderTemplate(templateName string, data any, code int) error {
 		if err == nil {
 			err = tmpl.ExecuteTemplate(c.Res, filepath.Base(templateName), data)
 			if err == nil {
+				summaryLogger.Flush()
 				return nil
 			}
 

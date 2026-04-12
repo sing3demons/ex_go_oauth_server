@@ -2,6 +2,7 @@ package mongo_store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/sing3demons/oauth_server/pkg/logAction"
 	"github.com/sing3demons/oauth_server/pkg/logger"
 	"github.com/sing3demons/oauth_server/pkg/mlog"
+	"github.com/sing3demons/oauth_server/pkg/utils"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -85,14 +87,21 @@ func (r *UserCredentialRepository) Create(ctx context.Context, credential *model
 	start := time.Now()
 	_logger := mlog.L(ctx)
 
+	rules := map[string]func(string) string{
+		"secret": utils.MaskPassword,
+	}
+	result := utils.MaskRecursive(credential, rules)
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency: r.col.Name(),
-	}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), map[string]any{
-		"document": credential,
-	}, logger.MaskingOption{
-		MaskingField: "secret",
-		MaskingType:  logger.MaskAll,
-	})
+	}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), fmt.Sprintf("users.insertOne(%v)", result))
+	// _logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+	// 	Dependency: r.col.Name(),
+	// }).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), map[string]any{
+	// 	"document": credential,
+	// }, logger.MaskingOption{
+	// 	MaskingField: "secret",
+	// 	MaskingType:  logger.MaskAll,
+	// })
 	_, err := r.col.InsertOne(ctx, credential)
 	end := time.Since(start).Microseconds()
 	if err != nil {
@@ -116,26 +125,26 @@ func (r *UserCredentialRepository) Create(ctx context.Context, credential *model
 }
 
 // CreateMany
-func (r *UserCredentialRepository) CreateMany(ctx context.Context, credentials []*models.UserCredential) error {
+func (r *UserCredentialRepository) CreateMany(ctx context.Context, credentials []models.UserCredential) error {
 	start := time.Now()
 	_logger := mlog.L(ctx)
 
+	rules := map[string]func(string) string{
+		"secret": utils.MaskPassword,
+	}
+	result := utils.MaskRecursive(credentials, rules)
+	jsonResult, _ := json.Marshal(result)
+
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency: r.col.Name(),
-	}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), map[string]any{
-		"documents": credentials,
-	}, logger.MaskingOption{
-		MaskingField: "secret",
-		IsArray:      true,
-		MaskingType:  logger.MaskAll,
-	})
+	}).Info(logAction.DB_REQUEST(logAction.DB_CREATE, "app -> mongo"), fmt.Sprintf("users.insertMany(%v)", string(jsonResult)))
 
 	var docs []any
 	for _, c := range credentials {
 		docs = append(docs, c)
 	}
 
-	_, err := r.col.InsertMany(ctx, docs)
+	results, err := r.col.InsertMany(ctx, docs)
 	end := time.Since(start).Microseconds()
 	if err != nil {
 		resultCode, resultDesc := classifyMongoError(err)
@@ -152,7 +161,7 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, credentials [
 		ResponseTime: end,
 		ResultCode:   "20000",
 	}).Info(logAction.DB_RESPONSE(logAction.DB_CREATE, "mongo -> app"), map[string]any{
-		"result": "inserted " + fmt.Sprintf("%d", len(credentials)) + " documents",
+		"result": results,
 	})
 	return nil
 }
@@ -167,9 +176,8 @@ func (r *UserCredentialRepository) FindByUsernamePassword(ctx context.Context, u
 	var credential models.UserCredential
 	err := r.col.FindOne(ctx, bson.M{"identifier": username, "type": "password"}).Decode(&credential)
 	end := time.Since(start).Microseconds()
+	resultCode, resultDesc := classifyMongoError(err)
 	if err != nil {
-		resultCode, resultDesc := classifyMongoError(err)
-
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
@@ -180,7 +188,7 @@ func (r *UserCredentialRepository) FindByUsernamePassword(ctx context.Context, u
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency:   r.col.Name(),
 		ResponseTime: end,
-		ResultCode:   "20000",
+		ResultCode:   resultCode,
 	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
 		"result": credential,
 	})
@@ -230,8 +238,8 @@ func (r *UserCredentialRepository) FindByID(ctx context.Context, id string) (*mo
 	var credential models.UserCredential
 	err := r.col.FindOne(ctx, bson.M{"_id": id}).Decode(&credential)
 	end := time.Since(start).Microseconds()
+	resultCode, resultDesc := classifyMongoError(err)
 	if err != nil {
-		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
@@ -242,7 +250,7 @@ func (r *UserCredentialRepository) FindByID(ctx context.Context, id string) (*mo
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency:   r.col.Name(),
 		ResponseTime: end,
-		ResultCode:   "20000",
+		ResultCode:   resultCode,
 	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
 		"result": credential,
 	})
@@ -314,9 +322,8 @@ func (r *UserCredentialRepository) FindAllByUserIDAndType(ctx context.Context, u
 
 	cursor, err := r.col.Find(ctx, filter)
 	end := time.Since(start).Microseconds()
+	resultCode, resultDesc := classifyMongoError(err)
 	if err != nil {
-		resultCode, resultDesc := classifyMongoError(err)
-
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
@@ -328,13 +335,19 @@ func (r *UserCredentialRepository) FindAllByUserIDAndType(ctx context.Context, u
 
 	var credentials []*models.UserCredential
 	if err := cursor.All(ctx, &credentials); err != nil {
+		resultCode, resultDesc := classifyMongoError(err)
+		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+			Dependency:   r.col.Name(),
+			ResponseTime: end,
+			ResultCode:   resultCode,
+		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
 		return nil, err
 	}
 
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency:   r.col.Name(),
 		ResponseTime: end,
-		ResultCode:   "20000",
+		ResultCode:   resultCode,
 	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
 		"count": len(credentials),
 	})
@@ -351,8 +364,8 @@ func (r *UserCredentialRepository) DeleteByID(ctx context.Context, id string) er
 
 	result, err := r.col.DeleteOne(ctx, bson.M{"_id": id})
 	end := time.Since(start).Microseconds()
+	resultCode, resultDesc := classifyMongoError(err)
 	if err != nil {
-		resultCode, resultDesc := classifyMongoError(err)
 
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
@@ -369,7 +382,7 @@ func (r *UserCredentialRepository) DeleteByID(ctx context.Context, id string) er
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency:   r.col.Name(),
 		ResponseTime: end,
-		ResultCode:   "20000",
+		ResultCode:   resultCode,
 	}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), "deleted credential successfully")
 
 	return nil
@@ -387,8 +400,8 @@ func (r *UserCredentialRepository) DeleteAllByUserIDAndType(ctx context.Context,
 
 	result, err := r.col.DeleteMany(ctx, filter)
 	end := time.Since(start).Microseconds()
+	resultCode, resultDesc := classifyMongoError(err)
 	if err != nil {
-		resultCode, resultDesc := classifyMongoError(err)
 		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 			Dependency:   r.col.Name(),
 			ResponseTime: end,
@@ -400,9 +413,9 @@ func (r *UserCredentialRepository) DeleteAllByUserIDAndType(ctx context.Context,
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency:   r.col.Name(),
 		ResponseTime: end,
-		ResultCode:   "20000",
+		ResultCode:   resultCode,
 	}).Info(logAction.DB_RESPONSE(logAction.DB_DELETE, "mongo -> app"), map[string]any{
-		"deleted_count": result.DeletedCount,
+		"result": result,
 	})
 	return nil
 }

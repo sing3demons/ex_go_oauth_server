@@ -157,30 +157,6 @@ func EnsureIndexes(client *mongo.Client, dbName string) error {
 		log.Printf("failed to create clients index: %v", err)
 	}
 
-	// 2. User Credentials Index (Compound Unique: identifier + type)
-	// Drop old single-field unique index if it exists
-	db.Collection("user_credentials").Indexes().DropOne(context.Background(), "identifier_1")
-
-	_, err = db.Collection("user_credentials").Indexes().CreateOne(context.Background(), mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "identifier", Value: 1},
-			{Key: "type", Value: 1},
-		},
-		Options: options.Index().SetUnique(true),
-	})
-	if err != nil {
-		log.Printf("failed to create credentials index: %v", err)
-	}
-
-	// 3. User Profiles Index
-	_, err = db.Collection("user_profiles").Indexes().CreateOne(context.Background(), mongo.IndexModel{
-		Keys:    bson.D{{Key: "user_id", Value: 1}},
-		Options: options.Index().SetUnique(true),
-	})
-	if err != nil {
-		log.Printf("failed to create profiles index: %v", err)
-	}
-
 	log.Println("Database indexes ensured successfully.")
 	return nil
 }

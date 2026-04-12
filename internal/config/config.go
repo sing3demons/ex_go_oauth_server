@@ -197,14 +197,14 @@ func LoadConfig() *Config {
 		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
 		InternalSecret:       getEnv("INTERNAL_SECRET", "this-is-a-32-byte-secret-key-123"), // Must be 32 bytes for AES-256
 		PairwiseSalt:         getEnv("PAIRWISE_SALT", "default-pairwise-salt-change-in-production"),
-		
+
 		WebAuthnRPDisplayName: getEnv("WEBAUTHN_RP_DISPLAY_NAME", yamlCfg.App.Name),
 		WebAuthnRPID:          getEnv("WEBAUTHN_RP_ID", "localhost"),
 		WebAuthnRPOrigin:      getEnv("WEBAUTHN_RP_ORIGIN", "http://localhost:"+getEnv("PORT", "8080")),
 
-		LoggerConfig:         yamlCfg.Log,
-		Oidc:                 yamlCfg.Oidc,
-		TrustedIssuers:       yamlCfg.TrustedIssuers,
+		LoggerConfig:   yamlCfg.Log,
+		Oidc:           yamlCfg.Oidc,
+		TrustedIssuers: yamlCfg.TrustedIssuers,
 	}
 }
 
@@ -235,6 +235,15 @@ func (c *Config) Get(key string) any {
 	}
 
 	return getNestedField(val, parts[1])
+}
+
+func (c *Config) GetString(key string) string {
+	if val := c.Get(key); val != nil {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 func (c *Config) GetArray(key string) []string {

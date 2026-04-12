@@ -2,6 +2,7 @@ package mongo_store
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/sing3demons/oauth_server/internal/core/models"
@@ -18,6 +19,15 @@ type UserProfileRepository struct {
 
 func NewUserProfileRepository(db *mongo.Database) *UserProfileRepository {
 	col := db.Collection("profile")
+
+	s, err := col.Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys:    bson.D{{Key: "user_id", Value: 1}},
+		Options: nil,
+	})
+	if err != nil {
+		log.Printf("failed to create profiles index: %v", err)
+	}
+	log.Printf("created index: %s", s)
 
 	return &UserProfileRepository{
 		col: col,

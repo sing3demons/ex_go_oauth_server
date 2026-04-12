@@ -1,6 +1,9 @@
 package utils
 
-import "strings"
+import (
+	"reflect"
+	"strings"
+)
 
 func MaskEmail(email string) string {
 	parts := strings.Split(email, "@")
@@ -69,26 +72,133 @@ func MaskRecursive[T any](data T, rules map[string]func(string) string) T {
 }
 
 func maskAny(data any, rules map[string]func(string) string) any {
-	switch v := data.(type) {
-	case map[string]any:
-		for k, val := range v {
-			if fn, ok := rules[k]; ok {
-				if str, ok := val.(string); ok {
-					v[k] = fn(str)
+	v := reflect.ValueOf(data)
+	if !v.IsValid() {
+		return data
+	}
+
+	return maskValue(v, rules).Interface()
+}
+
+func maskValue(v reflect.Value, rules map[string]func(string) string) reflect.Value {
+	if !v.IsValid() {
+		return v
+	}
+
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		inner := maskValue(v.Elem(), rules)
+		return inner
+
+	case reflect.Pointer:
+		if v.IsNil() {
+			return v
+		}
+		ptr := reflect.New(v.Elem().Type())
+		ptr.Elem().Set(maskValue(v.Elem(), rules))
+		return ptr
+
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		for _, k := range v.MapKeys() {
+			val := v.MapIndex(k)
+
+			if k.Kind() == reflect.String {
+				if fn, ok := rules[k.String()]; ok {
+					if str, ok := val.Interface().(string); ok {
+						out.SetMapIndex(k, reflect.ValueOf(fn(str)).Convert(v.Type().Elem()))
+						continue
+					}
+				}
+
+				if fn, ok := rules[k.String()]; ok && val.Kind() == reflect.String {
+					out.SetMapIndex(k, reflect.ValueOf(fn(val.String())).Convert(v.Type().Elem()))
 					continue
 				}
 			}
-			v[k] = maskAny(val, rules)
-		}
-		return v
 
-	case []any:
-		for i := range v {
-			v[i] = maskAny(v[i], rules)
+			masked := maskValue(val, rules)
+			if masked.IsValid() && masked.Type().AssignableTo(v.Type().Elem()) {
+				out.SetMapIndex(k, masked)
+			} else if masked.IsValid() && masked.Type().ConvertibleTo(v.Type().Elem()) {
+				out.SetMapIndex(k, masked.Convert(v.Type().Elem()))
+			} else {
+				out.SetMapIndex(k, val)
+			}
 		}
-		return v
+		return out
+
+	case reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		for i := 0; i < v.Len(); i++ {
+			out.Index(i).Set(maskValue(v.Index(i), rules))
+		}
+		return out
+
+	case reflect.Array:
+		out := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.Len(); i++ {
+			out.Index(i).Set(maskValue(v.Index(i), rules))
+		}
+		return out
+
+	case reflect.Struct:
+		out := reflect.New(v.Type()).Elem()
+		out.Set(v)
+
+		for i := 0; i < v.NumField(); i++ {
+			fieldInfo := v.Type().Field(i)
+			if fieldInfo.PkgPath != "" {
+				continue
+			}
+
+			fieldVal := v.Field(i)
+			if fn, ok := findMaskRule(fieldInfo, rules); ok && fieldVal.Kind() == reflect.String {
+				out.Field(i).SetString(fn(fieldVal.String()))
+				continue
+			}
+
+			masked := maskValue(fieldVal, rules)
+			if masked.IsValid() && masked.Type().AssignableTo(fieldVal.Type()) {
+				out.Field(i).Set(masked)
+			} else if masked.IsValid() && masked.Type().ConvertibleTo(fieldVal.Type()) {
+				out.Field(i).Set(masked.Convert(fieldVal.Type()))
+			}
+		}
+
+		return out
 
 	default:
 		return v
 	}
+}
+
+func findMaskRule(field reflect.StructField, rules map[string]func(string) string) (func(string) string, bool) {
+	if tag, ok := field.Tag.Lookup("json"); ok {
+		name := strings.Split(tag, ",")[0]
+		if name != "" && name != "-" {
+			if fn, found := rules[name]; found {
+				return fn, true
+			}
+		}
+	}
+
+	if fn, ok := rules[field.Name]; ok {
+		return fn, true
+	}
+
+	if fn, ok := rules[strings.ToLower(field.Name)]; ok {
+		return fn, true
+	}
+
+	return nil, false
 }
