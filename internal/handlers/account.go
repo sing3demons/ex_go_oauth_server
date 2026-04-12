@@ -82,7 +82,7 @@ func (h *AccountHandler) SessionsUI(ctx *kp.Ctx) {
 		TotpEnabled:   totpEnabled,
 	}
 
-	ctx.RenderTemplate("templates/account_sessions.html", data)
+	ctx.RenderTemplate("templates/account_sessions.html", data, http.StatusOK)
 }
 
 // RevokeSession (POST /account/sessions/revoke)
@@ -191,7 +191,7 @@ func (h *AccountHandler) HistoryUI(ctx *kp.Ctx) {
 		TotalCounts: total,
 	}
 
-	ctx.RenderTemplate("templates/account_history.html", data)
+	ctx.RenderTemplate("templates/account_history.html", data, http.StatusOK)
 }
 
 // PasskeysUI (GET /account/passkeys)
@@ -221,7 +221,7 @@ func (h *AccountHandler) PasskeysUI(ctx *kp.Ctx) {
 		Passkeys:   creds,
 	}
 
-	ctx.RenderTemplate("templates/account_passkeys.html", data)
+	ctx.RenderTemplate("templates/account_passkeys.html", data, http.StatusOK)
 }
 
 // RevokePasskey (POST /account/passkeys/revoke)

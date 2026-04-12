@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -645,6 +646,36 @@ func ToFiveDigitString[T NumberOrString](v T) string {
 	return s
 }
 
+func (c *Ctx) GetValUniversal(data any, key string) (string, bool) {
+	// case: map
+	if m, ok := data.(map[string]any); ok {
+		val, exists := m[key]
+		if exists {
+			if str, ok := val.(string); ok {
+				return str, true
+			}
+		}
+		return "", exists
+	}
+
+	// case: struct
+	v := reflect.ValueOf(data)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() == reflect.Struct {
+		field := v.FieldByName("Error")
+		if field.IsValid() {
+			if str, ok := field.Interface().(string); ok {
+				return str, true
+			}
+		}
+	}
+
+	return "", false
+}
+
 func (c *Ctx) RenderTemplate(templateName string, data any, code int) error {
 	c.Res.Header().Set("Content-Type", "text/html")
 	c.Res.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -714,11 +745,8 @@ func (c *Ctx) RenderTemplate(templateName string, data any, code int) error {
 			appResult = "Failed"
 			severity = "Critical"
 			appResultType = "Error"
-			// check data is type of map[string]any
-			if data, ok := data.(map[string]any); ok {
-				if err, ok := data["Error"]; ok {
-					appResult = err.(string)
-				}
+			if val, ok := c.GetValUniversal(data, "Error"); ok {
+				appResult = val
 			}
 
 			params := logger.SummaryParamsType{

@@ -48,7 +48,7 @@ func (h *MFAHandler) VerifyUI(ctx *kp.Ctx) {
 		Error: ctx.Req.URL.Query().Get("error"),
 	}
 
-	ctx.RenderTemplate("templates/mfa_verify.html", data)
+	ctx.RenderTemplate("templates/mfa_verify.html", data, http.StatusOK)
 }
 
 // VerifySubmit (POST /mfa/verify)
@@ -166,7 +166,7 @@ func (h *MFAHandler) SetupUI(ctx *kp.Ctx) {
 		Error:  ctx.Req.URL.Query().Get("error"),
 	}
 
-	ctx.RenderTemplate("templates/mfa_setup.html", data)
+	ctx.RenderTemplate("templates/mfa_setup.html", data, http.StatusOK)
 }
 
 // SetupSubmit (POST /mfa/setup)
