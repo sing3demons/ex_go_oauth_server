@@ -41,6 +41,12 @@ type OAuthHandler struct {
 	cfg                *config.Config
 }
 
+type AuthPageData struct {
+	SID   string
+	TID   string
+	Error string
+}
+
 func NewOAuthHandler(
 	cfg *config.Config,
 	clientRepo ports.ClientRepository,
@@ -67,6 +73,95 @@ func NewOAuthHandler(
 		auditRepo:          auditRepo,
 		rateLimitStore:     rateLimitStore,
 	}
+}
+
+func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
+	ctx.Log("authorize")
+
+	query := ctx.Req.URL.Query()
+	sid := ctx.SessionId() // cookie override จัดการใน ensureRequestMetadata แล้ว
+	tid := ctx.TransactionId()
+	errMsg := query.Get("error")
+	client_id := query.Get("client_id")
+	redirect_uri := query.Get("redirect_uri")
+
+	// 0. ตรวจสอบว่ามี Error มาจากหน้า Logout หรือไม่ (Allow rendering without Client context for Logout)
+	if errMsg != "" && (client_id == "" || redirect_uri == "") {
+		h.renderAuthPage(ctx, "", "", errMsg)
+		return
+	}
+
+	if errMsg != "" {
+		ctx.JSONError(&response.Error{
+			Err:     fmt.Errorf("error: %s", errMsg),
+			Message: response.InvalidRequest,
+		}, response.InvalidRequest.Error())
+		return
+	}
+
+	if client_id == "" || redirect_uri == "" {
+		ctx.JSONError(&response.Error{
+			Err:     fmt.Errorf("missing required parameters: client_id=%s, redirect_uri=%s", client_id, redirect_uri),
+			Message: response.MissingOrInvalidParameter,
+		}, response.MissingOrInvalidParameter.Error())
+		return
+	}
+
+	queryTid := query.Get("tid")
+	// 1. ถ้าไม่มี tid แสดงว่าเป็นการเริ่ม OAuth Flow ใหม่
+	if queryTid == "" {
+		body, err := h.insertTransaction(ctx, query, tid)
+		if err != nil {
+			// RFC 6749 4.1.2.1: If redirect_uri/client_id are valid, redirect errors back to the client.
+			if body == response.UnsupportedResponseType || body == response.InvalidScope || body == response.SystemError {
+				redirectURI := query.Get("redirect_uri")
+				if redirectURI != "" {
+					u := h.mapErrorToRedirect(err, body, redirectURI, query.Get("state"))
+					ctx.Redirect(u, http.StatusFound)
+					return
+				}
+			}
+			ctx.JSONError(err, body.Error())
+			return
+		}
+	} else {
+		// 2. ถ้ามี tid อยู่แล้ว เช็คว่าความจำนี้หมดอายุหรือยัง
+		_, err := h.transactionCache.GetTransaction(ctx, tid)
+		if err != nil {
+			if errors.Is(err, pkgErrors.ErrNotFound) {
+				body, err := h.insertTransaction(ctx, query, tid)
+				if err != nil {
+					if body == response.UnsupportedResponseType || body == response.InvalidScope || body == response.SystemError {
+						redirectURI := query.Get("redirect_uri")
+						if redirectURI != "" {
+							u := h.mapErrorToRedirect(err, body, redirectURI, query.Get("state"))
+							ctx.Redirect(u, http.StatusFound)
+							return
+						}
+					}
+					ctx.JSONError(err, body.Error())
+					return
+				}
+			} else {
+				ctx.JSONError(&response.Error{
+					Err:     err,
+					Message: "Session or Transaction expired. Please return to your app and try again.",
+				}, map[string]string{"error": "transaction_expired"})
+				return
+			}
+		}
+	}
+
+	// 2.5 ตรวจสอบว่ามี sid อยู่ในระบบ (Log in ค้างไว้) หรือไม่
+	session, _ := h.sessionCache.GetSession(ctx, sid)
+	if session != nil {
+		// ถ้าเคย Login แล้ว พาไปหน้า Consent ทันที
+		ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
+		return
+	}
+
+	// 3. Render Unified Auth Page
+	h.renderAuthPage(ctx, sid, tid, errMsg)
 }
 
 func (h *OAuthHandler) calculateOTPBan(attempts int) time.Duration {
@@ -117,13 +212,7 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 		}
 	}
 
-	validURI := false
-	for _, uri := range client.RedirectURIs {
-		if uri == redirectURI {
-			validURI = true
-			break
-		}
-	}
+	validURI := slices.Contains(client.RedirectURIs, redirectURI)
 	if !validURI {
 		return response.InvalidGrant, &response.Error{
 			Err:     fmt.Errorf("redirect_uri not registered: %s", redirectURI),
@@ -133,13 +222,7 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 
 	responseType := query.Get("response_type")
 	// 2. Validate response_type against server's supported list from config
-	responseTypeAllowed := false
-	for _, rt := range h.cfg.Oidc.SupportedResponseTypes {
-		if rt == responseType {
-			responseTypeAllowed = true
-			break
-		}
-	}
+	responseTypeAllowed := slices.Contains(h.cfg.Oidc.SupportedResponseTypes, responseType)
 	if !responseTypeAllowed {
 		return response.UnsupportedResponseType, &response.Error{
 			Err:     fmt.Errorf("unsupported response_type: %s", responseType),
@@ -151,13 +234,7 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	requestedScopes := strings.Fields(query.Get("scope"))
 
 	// 1. openid scope บังคับใน OIDC (RFC)
-	hasOpenID := false
-	for _, s := range requestedScopes {
-		if s == "openid" {
-			hasOpenID = true
-			break
-		}
-	}
+	hasOpenID := slices.Contains(requestedScopes, "openid")
 	if !hasOpenID {
 		return response.InvalidScope, &response.Error{
 			Err:     fmt.Errorf("scope 'openid' is required"),
@@ -215,129 +292,26 @@ func (h *OAuthHandler) insertTransaction(ctx *kp.Ctx, query url.Values, tid stri
 	return response.Success, nil
 }
 
-func (h *OAuthHandler) Authorize(ctx *kp.Ctx) {
-	ctx.Log("authorize")
-
-	query := ctx.Req.URL.Query()
-	sid := ctx.SessionId() // cookie override จัดการใน ensureRequestMetadata แล้ว
-	tid := ctx.TransactionId()
-	errMsg := query.Get("error")
-	client_id := query.Get("client_id")
-	redirect_uri := query.Get("redirect_uri")
-
-	// 0. ตรวจสอบว่ามี Error มาจากหน้า Logout หรือไม่ (Allow rendering without Client context for Logout)
-	if errMsg != "" && (client_id == "" || redirect_uri == "") {
-		h.renderAuthPage(ctx, "", "", errMsg)
-		return
+func (h *OAuthHandler) mapErrorToRedirect(err *response.Error, body response.MessageError, redirectURI, state string) string {
+	u, _ := url.Parse(redirectURI)
+	q := u.Query()
+	switch body {
+	case response.UnsupportedResponseType:
+		q.Set("error", "unsupported_response_type")
+	case response.InvalidScope:
+		q.Set("error", "invalid_scope")
+	case response.SystemError:
+		q.Set("error", "server_error")
 	}
-
-	if errMsg != "" {
-		ctx.JSONError(&response.Error{
-			Err:     fmt.Errorf("error: %s", errMsg),
-			Message: response.InvalidRequest,
-		}, response.InvalidRequest.Error())
-		return
+	q.Set("error_description", err.Error())
+	if state != "" {
+		q.Set("state", state)
 	}
-
-	if client_id == "" || redirect_uri == "" {
-		ctx.JSONError(&response.Error{
-			Err:     fmt.Errorf("missing required parameters: client_id=%s, redirect_uri=%s", client_id, redirect_uri),
-			Message: response.MissingOrInvalidParameter,
-		}, response.MissingOrInvalidParameter.Error())
-		return
-	}
-
-	queryTid := query.Get("tid")
-	// 1. ถ้าไม่มี tid แสดงว่าเป็นการเริ่ม OAuth Flow ใหม่
-	if queryTid == "" {
-		body, err := h.insertTransaction(ctx, query, tid)
-		if err != nil {
-			// RFC 6749 4.1.2.1: If redirect_uri/client_id are valid, redirect errors back to the client.
-			if body == response.UnsupportedResponseType || body == response.InvalidScope || body == response.SystemError {
-				redirectURI := query.Get("redirect_uri")
-				if redirectURI != "" {
-					u, _ := url.Parse(redirectURI)
-					q := u.Query()
-					switch body {
-					case response.UnsupportedResponseType:
-						q.Set("error", "unsupported_response_type")
-					case response.InvalidScope:
-						q.Set("error", "invalid_scope")
-					case response.SystemError:
-						q.Set("error", "server_error")
-					}
-					q.Set("error_description", err.Error())
-					if state := query.Get("state"); state != "" {
-						q.Set("state", state)
-					}
-					u.RawQuery = q.Encode()
-					ctx.Redirect(u.String(), http.StatusFound)
-					return
-				}
-			}
-			ctx.JSONError(err, body.Error())
-			return
-		}
-	} else {
-		// 2. ถ้ามี tid อยู่แล้ว เช็คว่าความจำนี้หมดอายุหรือยัง
-		_, err := h.transactionCache.GetTransaction(ctx, tid)
-		if err != nil {
-			if errors.Is(err, pkgErrors.ErrNotFound) {
-				body, err := h.insertTransaction(ctx, query, tid)
-				if err != nil {
-					if body == response.UnsupportedResponseType || body == response.InvalidScope || body == response.SystemError {
-						redirectURI := query.Get("redirect_uri")
-						if redirectURI != "" {
-							u, _ := url.Parse(redirectURI)
-							q := u.Query()
-							switch body {
-							case response.UnsupportedResponseType:
-								q.Set("error", "unsupported_response_type")
-							case response.InvalidScope:
-								q.Set("error", "invalid_scope")
-							case response.SystemError:
-								q.Set("error", "server_error")
-							}
-							q.Set("error_description", err.Error())
-							if state := query.Get("state"); state != "" {
-								q.Set("state", state)
-							}
-							u.RawQuery = q.Encode()
-							ctx.Redirect(u.String(), http.StatusFound)
-							return
-						}
-					}
-					ctx.JSONError(err, body.Error())
-					return
-				}
-			} else {
-				ctx.JSONError(&response.Error{
-					Err:     err,
-					Message: "Session or Transaction expired. Please return to your app and try again.",
-				}, map[string]string{"error": "transaction_expired"})
-				return
-			}
-		}
-	}
-
-	// 2.5 ตรวจสอบว่ามี sid อยู่ในระบบ (Log in ค้างไว้) หรือไม่
-	session, _ := h.sessionCache.GetSession(ctx, sid)
-	if session != nil {
-		// ถ้าเคย Login แล้ว พาไปหน้า Consent ทันที
-		ctx.Redirect("/consent?sid="+url.QueryEscape(sid)+"&tid="+url.QueryEscape(tid), http.StatusFound)
-		return
-	}
-
-	// 3. Render Unified Auth Page
-	h.renderAuthPage(ctx, sid, tid, errMsg)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func (h *OAuthHandler) renderAuthPage(ctx *kp.Ctx, sid, tid, errMsg string) {
-	type AuthPageData struct {
-		SID   string
-		TID   string
-		Error string
-	}
 	data := AuthPageData{
 		SID:   sid,
 		TID:   tid,
@@ -352,6 +326,16 @@ func (h *OAuthHandler) findUserByUsernameOrEmail(ctx *kp.Ctx, identifier string)
 		result, err := h.userCredentialRepo.FindByEmailPassword(ctx, identifier)
 		return result, true, err
 	}
+
+	phoneNum, valid := h.isPhoneNumberValid(identifier)
+	if valid {
+		result, err := h.userCredentialRepo.FindByPhoneNumberPassword(ctx, phoneNum)
+		return result, false, err
+	}
+	//  else if utils.IsPhoneNumber(identifier) {
+	// 	result, err := h.userCredentialRepo.FindByPhoneNumberPassword(ctx, identifier)
+	// 	return result, true, err
+	// }
 
 	result, err := h.userCredentialRepo.FindByUsernamePassword(ctx, identifier)
 	return result, false, err

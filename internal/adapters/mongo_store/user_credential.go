@@ -173,26 +173,7 @@ func (r *UserCredentialRepository) FindByUsernamePassword(ctx context.Context, u
 		Dependency: r.col.Name(),
 	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), "users.findOne({username: "+username+", type: password})")
 
-	var credential models.UserCredential
-	err := r.col.FindOne(ctx, bson.M{"identifier": username, "type": "password"}).Decode(&credential)
-	end := time.Since(start).Microseconds()
-	resultCode, resultDesc := classifyMongoError(err)
-	if err != nil {
-		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
-			Dependency:   r.col.Name(),
-			ResponseTime: end,
-			ResultCode:   resultCode,
-		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
-		return nil, err
-	}
-	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
-		Dependency:   r.col.Name(),
-		ResponseTime: end,
-		ResultCode:   resultCode,
-	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
-		"result": credential,
-	})
-	return &credential, nil
+	return r.findOne(ctx, _logger, start, bson.M{"identifier": username, "type": "password"})
 }
 func (r *UserCredentialRepository) FindByEmailPassword(ctx context.Context, email string) (*models.UserCredential, error) {
 	start := time.Now()
@@ -201,9 +182,21 @@ func (r *UserCredentialRepository) FindByEmailPassword(ctx context.Context, emai
 	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
 		Dependency: r.col.Name(),
 	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), "users.findOne({email: "+email+", type: password})")
+	return r.findOne(ctx, _logger, start, bson.M{"identifier": email, "type": "password"})
+}
+func (r *UserCredentialRepository) FindByPhoneNumberPassword(ctx context.Context, phoneNumber string) (*models.UserCredential, error) {
+	start := time.Now()
+	_logger := mlog.L(ctx)
 
+	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
+		Dependency: r.col.Name(),
+	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), "users.findOne({phone_number: "+phoneNumber+", type: password})")
+
+	return r.findOne(ctx, _logger, start, bson.M{"identifier": phoneNumber, "type": "password"})
+}
+func (r *UserCredentialRepository) findOne(ctx context.Context, _logger *logger.CustomLogger, start time.Time, filter bson.M) (*models.UserCredential, error) {
 	var credential models.UserCredential
-	err := r.col.FindOne(ctx, bson.M{"identifier": email, "type": "password"}).Decode(&credential)
+	err := r.col.FindOne(ctx, filter).Decode(&credential)
 	end := time.Since(start).Microseconds()
 	resultCode, resultDesc := classifyMongoError(err)
 	if err != nil {
@@ -235,26 +228,7 @@ func (r *UserCredentialRepository) FindByID(ctx context.Context, id string) (*mo
 		Dependency: r.col.Name(),
 	}).Info(logAction.DB_REQUEST(logAction.DB_READ, "app -> mongo"), "users.findOne({_id: "+id+"})")
 
-	var credential models.UserCredential
-	err := r.col.FindOne(ctx, bson.M{"_id": id}).Decode(&credential)
-	end := time.Since(start).Microseconds()
-	resultCode, resultDesc := classifyMongoError(err)
-	if err != nil {
-		_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
-			Dependency:   r.col.Name(),
-			ResponseTime: end,
-			ResultCode:   resultCode,
-		}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), resultDesc)
-		return nil, err
-	}
-	_logger.SetDependencyMetadata(logger.LogDependencyMetadata{
-		Dependency:   r.col.Name(),
-		ResponseTime: end,
-		ResultCode:   resultCode,
-	}).Info(logAction.DB_RESPONSE(logAction.DB_READ, "mongo -> app"), map[string]any{
-		"result": credential,
-	})
-	return &credential, nil
+	return r.findOne(ctx, _logger, start, bson.M{"_id": id})
 }
 
 func (r *UserCredentialRepository) FindByUserIDAndType(ctx context.Context, userID, credentialType string) (*models.UserCredential, error) {
